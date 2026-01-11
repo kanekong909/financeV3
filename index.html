@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gastos Diarios</title>
+  <link rel="stylesheet" href="style.css"/> <!-- Cambié a style.css como en tu link -->
+
+  <!-- Solo la librería GSI nueva (suficiente para login + token) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- Nota: quitamos apis.google.com/js/api.js porque usaremos fetch + token -->
+</head>
+<body>
+
+    <div class="container" id="app">
+        <!-- Pantalla de login -->
+        <div id="login-screen" class="screen active">
+        <div class="card">
+            <h1>Gastos Diarios</h1>
+            <p>Inicia sesión con Google para guardar tus gastos</p>
+
+            <!-- Inicialización automática (OBLIGATORIO para botón) -->
+            <div id="g_id_onload"
+                data-client_id="574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com"
+                data-callback="handleCredentialResponse"
+                data-auto_prompt="false">
+            </div>
+
+            <!-- Botón renderizado automáticamente -->
+            <div class="g_id_signin"
+                data-type="standard"
+                data-size="large"
+                data-theme="outline"
+                data-text="sign_in_with"
+                data-shape="rectangular"
+                data-logo_alignment="left">
+            </div>
+        </div>
+        </div>
+
+        <!-- Pantalla de autorización (Sheets) -->
+        <div id="auth-screen" class="screen">
+        <div class="card">
+            <h2>Autorización requerida</h2>
+            <p>La app necesita permiso para escribir en tu Google Sheets</p>
+            <button id="authorize-btn" class="btn primary">Autorizar Google Sheets</button>
+        </div>
+        </div>
+
+        <!-- Pantalla principal -->
+        <div id="main-screen" class="screen">
+        <header>
+            <h1>Mis Gastos</h1>
+            <button id="signout-btn" class="btn small">Cerrar sesión</button>
+        </header>
+
+        <div class="grid">
+            <!-- Formulario -->
+            <section class="card form-section">
+            <h2>Nuevo gasto</h2>
+            <form id="expense-form">
+                <div class="form-group">
+                    <label for="date">Fecha</label>
+                    <input type="date" id="date" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="amount">Monto</label>
+                    <input type="number" id="amount" placeholder="Monto" step="0.01" required/>
+                </div>
+
+                <div class="form-group">
+                    <label for="category">Categoría</label>
+                    <select id="category" required>
+                    <option value="" disabled selected>Selecciona una categoría</option>
+                    <option>Comida</option>
+                    <option>Transporte</option>
+                    <option>Entretenimiento</option>
+                    <option>Compras</option>
+                    <option>Salud</option>
+                    <option>Otro</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Descripción</label>
+                    <input type="text" id="description" placeholder="Descripción (opcional)"/>
+                </div>
+
+                <button type="submit" class="btn primary">Agregar gasto</button>
+            </form>
+            </section>
+
+            <!-- Lista y total -->
+            <section class="card list-section">
+                <div class="total">
+                    <h2>Resumen</h2>
+                    <div id="total-amount">$0.00</div>
+                </div>
+
+                <!-- Filtros -->
+                <div class="filters-container">
+                    <input type="text" id="filter-search" placeholder="Buscar por descripción...">
+                    <select id="filter-category">
+                        <option value="All">Todas las categorías</option>
+                        <option>Comida</option>
+                        <option>Transporte</option>
+                        <option>Entretenimiento</option>
+                        <option>Compras</option>
+                        <option>Salud</option>
+                        <option>Otro</option>
+                    </select>
+                </div>
+
+                <!-- Lista de gastos -->
+                <div id="expenses-list" class="expenses"></div>
+            </section>
+
+            <!-- Historial meses anteriores -->
+            <div style="text-align: center;">
+                <button type="button" class="btn secondary" id="view-history-btn">Ver meses anteriores</button>
+            </div>
+
+            <div id="history-modal" class="modal">
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2>Historial Completo</h2>
+                        <button type="button" class="modal-close" id="close-history">×</button>
+                    </div>
+                    <div id="history-list" class="expenses" style="max-height: 400px;"></div>
+                </div>
+            </div>
+
+            <!-- PDF Export -->
+            <div class="pdf-section card" style="display: flex; gap: 10px; align-items: flex-end;">
+                <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                    <label>Exportar Mes:</label>
+                    <select id="export-month-select">
+                        </select>
+                </div>
+                <button type="button" class="btn" style="background-color: #ff4d4d; color: white;" id="download-pdf-btn">
+                    Descargar PDF
+                </button>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <!-- Modal de edición -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+            <h2>Editar Gasto</h2>
+            <button type="button" class="modal-close">×</button>
+            </div>
+            
+            <form id="edit-form">
+            <div class="form-group">
+                <label for="edit-fecha">Fecha y Hora</label>
+                <input type="datetime-local" id="edit-fecha" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="edit-monto">Monto</label>
+                <input type="number" id="edit-monto" step="0.01" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="edit-categoria">Categoría</label>
+                <select id="edit-categoria" required>
+                <option value="Comida">Comida</option>
+                <option value="Transporte">Transporte</option>
+                <option value="Entretenimiento">Entretenimiento</option>
+                <option value="Compras">Compras</option>
+                <option value="Salud">Salud</option>
+                <option value="Otro">Otro</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="edit-descripcion">Descripción</label>
+                <input type="text" id="edit-descripcion">
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" class="btn secondary modal-cancel">Cancelar</button>
+                <button type="submit" class="btn primary">Guardar Cambios</button>
+            </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de confirmación de eliminación -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>¿Eliminar gasto?</h2>
+                <button type="button" class="modal-close" id="close-delete-x">×</button>
+            </div>
+            <p style="text-align: left; margin-bottom: 2rem;">Esta acción no se puede deshacer. El registro se borrará permanentemente de tu Google Sheets.</p>
+            <div class="modal-actions">
+                <button type="button" class="btn secondary" id="cancel-delete-btn">Cancelar</button>
+                <button type="button" class="btn" style="background-color: var(--error-color); color: white;" id="confirm-delete-btn">Eliminar ahora</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="index.js"></script>  <!-- Tu script con la lógica -->
+    <!-- PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+</body>
+</html>
