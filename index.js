@@ -253,10 +253,10 @@ function renderExpenses(expensesWithRow) {
         <div class="expense-amount">${montoFormateado}</div>
         <div class="expense-actions">
           <button class="btn-edit" title="Editar">
-            <img src="/assets/img/edit.svg" alt="Editar" width="26" height="26">
+            <img src="./assets/img/edit.svg" alt="Editar" width="26" height="26">
           </button>
           <button class="btn-delete" title="Eliminar">
-            <img src="/assets/img/delete.svg" alt="Eliminar" width="26" height="26">
+            <img src="./assets/img/delete.svg" alt="Eliminar" width="26" height="26">
           </button>
         </div>
       `;
