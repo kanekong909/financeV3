@@ -58,44 +58,46 @@
         <div class="grid">
             <!-- Formulario -->
             <section class="card form-section">
-            <h2>Nuevo gasto</h2>
-            <form id="expense-form">
-                <div class="form-group">
-                    <label for="date">Fecha</label>
-                    <input type="date" id="date" required>
-                </div>
+                <h2>Nuevo gasto</h2>
+                <form id="expense-form">
+                    <div class="form-group">
+                        <label for="date">Fecha y Hora</label>
+                        <input type="datetime-local" id="date" required>
+                    </div>
 
-                <div class="form-group">
-                    <label for="amount">Monto</label>
-                    <input type="number" id="amount" placeholder="Monto" step="0.01" required/>
-                </div>
+                    <div class="form-group">
+                        <label for="amount">Monto</label>
+                        <input type="number" id="amount" placeholder="Monto" step="0.01" required/>
+                    </div>
 
-                <div class="form-group">
-                    <label for="category">Categoría</label>
-                    <select id="category" required>
-                    <option value="" disabled selected>Selecciona una categoría</option>
-                    <option>Comida</option>
-                    <option>Transporte</option>
-                    <option>Entretenimiento</option>
-                    <option>Compras</option>
-                    <option>Salud</option>
-                    <option>Otro</option>
-                    </select>
-                </div>
+                    <div class="form-group">
+                        <label for="category">Categoría</label>
+                        <select id="category" required>
+                        <option value="" disabled selected>Selecciona una categoría</option>
+                        <option>Comida</option>
+                        <option>Transporte</option>
+                        <option>Entretenimiento</option>
+                        <option>Compras</option>
+                        <option>Salud</option>
+                        <option>Otro</option>
+                        </select>
+                    </div>
 
-                <div class="form-group">
-                    <label for="description">Descripción</label>
-                    <input type="text" id="description" placeholder="Descripción (opcional)"/>
-                </div>
+                    <div class="form-group">
+                        <label for="description">Descripción</label>
+                        <input type="text" id="description" placeholder="Descripción (opcional)"/>
+                    </div>
 
-                <button type="submit" class="btn primary">Agregar gasto</button>
-            </form>
+                    <button type="submit" class="btn primary">Agregar gasto</button>
+                </form>
             </section>
 
             <!-- Lista y total -->
             <section class="card list-section">
                 <div class="total">
-                    <h2>Resumen</h2>
+                    <h2>Resumen 
+                        <span id="current-month-name"></span>
+                    </h2>
                     <div id="total-amount">$0.00</div>
                 </div>
 
@@ -118,10 +120,11 @@
             </section>
 
             <!-- Historial meses anteriores -->
-            <div style="text-align: center;">
+            <div class="btn-meses-anteriores" style="text-align: center;">
                 <button type="button" class="btn secondary" id="view-history-btn">Ver meses anteriores</button>
             </div>
 
+            <!-- Historial Modal -->
             <div id="history-modal" class="modal">
                 <div class="modal-content" style="max-width: 600px;">
                     <div class="modal-header">
@@ -134,14 +137,27 @@
 
             <!-- PDF Export -->
             <div class="pdf-section card" style="display: flex; gap: 10px; align-items: flex-end;">
-                <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                    <label>Exportar Mes:</label>
-                    <select id="export-month-select">
-                        </select>
+                <div class="pdf-section card" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                    <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                        <label>Año:</label>
+                        <select id="export-year-select"></select>
+                    </div>
+                    <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+                        <label>Mes:</label>
+                        <select id="export-month-select"></select>
+                    </div>
+                    <button type="button" class="btn" style="background-color: #ff4d4d; color: white; height: 45px;" id="download-pdf-btn">
+                        Descargar PDF
+                    </button>
                 </div>
-                <button type="button" class="btn" style="background-color: #ff4d4d; color: white;" id="download-pdf-btn">
-                    Descargar PDF
-                </button>
+            </div>
+
+            <!-- Grafica de gastos -->
+            <div class="chart-section">
+                <div class="chart-container">
+                    <h2>Gráfico de Gastos</h2>
+                    <canvas id="expensesChart"></canvas>
+                </div>
             </div>
         </div>
         </div>
@@ -210,5 +226,8 @@
     <!-- PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- ChartJS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>

@@ -37,9 +37,16 @@ const deleteModal = document.getElementById('delete-modal');
 const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
 let rowToDelete = null; // Variable para guardar temporalmente la fila
 
+// Elegir año y mes para exportar PDF
+// Variable para organizar los datos por año y mes
+let availableDates = {};
+
 // Historial de gastos
 const historyModal = document.getElementById('history-modal');
 const historyList = document.getElementById('history-list');
+
+// Graficos
+let expensesChart = null; // Para poder destruir y recrear el gráfico al actualizar
 
 // DETERMINAR MES ACTUAL
 // Obtener mes y año actual en formato "MM/YYYY" para comparar
@@ -50,6 +57,24 @@ function getMonthKey(date = new Date()) {
 }
 
 const currentMonthKey = getMonthKey(); // Ej: "01/2026"
+
+// Funcion actualizar nombre del mes en el resumen
+function updateMonthDisplay() {
+    const monthDisplay = document.getElementById('current-month-name');
+    if (monthDisplay) {
+        const opciones = { month: 'long', year: 'numeric' };
+        const nombreMes = new Intl.DateTimeFormat('es-CO', opciones).format(new Date());
+        // Capitalizamos la primera letra
+        monthDisplay.textContent = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+    }
+}
+
+// Fecha por defecto
+function setDefaultDate() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    document.getElementById('date').value = now.toISOString().slice(0, 16);
+}
 
 // --- LÓGICA DE NAVEGACIÓN ---
 function showScreen(screen) {
@@ -155,38 +180,48 @@ async function loadExpenses() {
 
 // Agregar gasto
 form.onsubmit = async (e) => {
-  e.preventDefault(); // EVITA QUE LA PÁGINA SE RECARGUE (Crucial)
+    e.preventDefault();
 
-  const values = [
-    new Date().toLocaleString('es-CO', { 
+    // 1. Obtener el valor del input datetime-local
+    const dateValue = document.getElementById('date').value; // Ejemplo: "2025-12-29T14:30"
+    if (!dateValue) return;
+
+    // 2. Formatear la fecha para que Sheets la entienda (DD/MM/YYYY HH:mm)
+    const dateObj = new Date(dateValue);
+    const fechaFormateada = dateObj.toLocaleString('es-CO', { 
         day: '2-digit', month: '2-digit', year: 'numeric', 
         hour: '2-digit', minute: '2-digit', hour12: false 
-    }).replace(',', ''),
-    amountInput.value,
-    categorySelect.value,
-    descInput.value.trim() || ''
-  ];
+    }).replace(',', '');
 
-  try {
-    const resp = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/Gastos!A:D:append?valueInputOption=USER_ENTERED`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values: [values] })
-      }
-    );
+    const values = [
+        fechaFormateada,
+        amountInput.value,
+        categorySelect.value,
+        descInput.value.trim() || ''
+    ];
 
-    if (!resp.ok) throw new Error('Error al agregar');
+    try {
+        const resp = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/Gastos!A:D:append?valueInputOption=USER_ENTERED`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ values: [values] })
+            }
+        );
 
-    form.reset();
-    loadExpenses();
-  } catch (err) {
-    console.error('Error al agregar:', err);
-  }
+        if (!resp.ok) throw new Error('Error al agregar');
+
+        form.reset();
+        // Opcional: Volver a poner la fecha de hoy por defecto después de limpiar
+        setDefaultDate(); 
+        loadExpenses();
+    } catch (err) {
+        console.error('Error al agregar:', err);
+    }
 };
 
 // Renderizar lista
@@ -239,6 +274,8 @@ function renderExpenses(expensesWithRow) {
     });
   }
   totalEl.textContent = formatter.format(total);
+
+  updateChart(expensesWithRow);
 }
 
 // Eliminar gasto
@@ -426,87 +463,150 @@ document.getElementById('close-history').onclick = () => {
 function renderHistory() {
     historyList.innerHTML = '';
     
-    // 1. Definir el formateador de moneda (estilo COP)
     const formatter = new Intl.NumberFormat('es-CO', {
         style: 'currency', currency: 'COP',
         minimumFractionDigits: 0, maximumFractionDigits: 0
     });
 
-    // 2. Filtrar con la lógica robusta de partes de fecha
+    // 1. Filtrar: Solo meses que NO son el actual
     const historyData = allExpensesData.filter(({ rowData }) => {
-        const fechaCelda = rowData[0]; // Ej: "10/1/2026 17:00"
-        
-        const soloFecha = fechaCelda.split(' ')[0]; // "10/1/2026"
-        const partes = soloFecha.split('/');        // ["10", "1", "2026"]
-        
-        // Creamos la llave MM/YYYY (asegurando 01 en lugar de 1)
-        const mesGasto = partes[1]?.padStart(2, '0');
-        const anioGasto = partes[2];
-        const monthKeyGasto = `${mesGasto}/${anioGasto}`;
-
-        // Retornamos los que NO coinciden con el mes actual
+        const partes = rowData[0].split(' ')[0].split('/');
+        const monthKeyGasto = `${partes[1]?.padStart(2, '0')}/${partes[2]}`;
         return monthKeyGasto !== currentMonthKey;
     });
 
-    // 3. Validar si hay datos
     if (historyData.length === 0) {
-        historyList.innerHTML = '<p style="text-align:center; padding:20px; color:var(--text-secondary);">No hay gastos de meses anteriores.</p>';
+        historyList.innerHTML = '<p style="text-align:center; padding:20px; color:var(--text-muted);">No hay gastos de meses anteriores.</p>';
         return;
     }
 
-    // 4. Renderizar (Invertimos para ver lo más reciente del pasado primero)
-    // Usamos [...historyData] para no mutar el array original al hacer reverse
-    [...historyData].reverse().forEach(({ rowData }) => {
-        const [fecha, monto, categoria, desc] = rowData;
-        const mNum = Number(monto || 0);
+    // 2. AGRUPAR por mes
+    const groups = {};
+    historyData.forEach(item => {
+        const partes = item.rowData[0].split(' ')[0].split('/');
+        const key = `${partes[1]?.padStart(2, '0')}/${partes[2]}`; // MM/YYYY
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+    });
 
-        const item = document.createElement('div');
-        item.className = 'expense-item';
-        item.innerHTML = `
-            <div class="expense-info">
-                <strong>${desc || 'Sin descripción'}</strong>
-                <div class="small">${fecha} • ${categoria}</div>
-            </div>
-            <div class="expense-amount">${formatter.format(mNum)}</div>
-        `;
-        historyList.appendChild(item);
+    // 3. ORDENAR las llaves de los meses (de más reciente a más antiguo)
+    const sortedMonthKeys = Object.keys(groups).sort((a, b) => {
+        const [mA, yA] = a.split('/').map(Number);
+        const [mB, yB] = b.split('/').map(Number);
+        return (yB - yA) || (mB - mA); // Orden descendente
+    });
+
+    // 4. RENDERIZAR por grupos
+    sortedMonthKeys.forEach(monthKey => {
+        // Crear separador de mes
+        const [m, y] = monthKey.split('/');
+        const nombreMes = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' })
+                          .format(new Date(y, m - 1));
+        
+        const header = document.createElement('div');
+        header.className = 'history-month-header';
+        header.innerHTML = `<span class="nombre-mes">${nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1)}</span>`;
+        historyList.appendChild(header);
+
+        // Renderizar gastos de ese mes (dentro del mes, los más recientes arriba)
+        groups[monthKey].reverse().forEach(({ rowData }) => {
+            const [fecha, monto, categoria, desc] = rowData;
+            const item = document.createElement('div');
+            item.className = 'expense-item';
+            item.innerHTML = `
+                <div class="expense-info">
+                    <strong>${desc || 'Sin descripción'}</strong>
+                    <div class="small">${fecha} • ${categoria}</div>
+                </div>
+                <div class="expense-amount">${formatter.format(Number(monto))}</div>
+            `;
+            historyList.appendChild(item);
+        });
     });
 }
 
 // Exportar PDF
 function updateExportSelector() {
-    const select = document.getElementById('export-month-select');
-    select.innerHTML = '';
-    
-    // Extraer meses únicos de todos los datos
-    const months = [...new Set(allExpensesData.map(({ rowData }) => {
-        const partes = rowData[0].split(' ')[0].split('/');
-        return `${partes[1]?.padStart(2, '0')}/${partes[2]}`;
-    }))].sort().reverse(); // De más reciente a más antiguo
+    const yearSelect = document.getElementById('export-year-select');
+    const monthSelect = document.getElementById('export-month-select');
+    if (!yearSelect || !monthSelect) return;
 
-    months.forEach(m => {
-        const option = document.createElement('option');
-        option.value = m;
-        option.textContent = m;
-        select.appendChild(option);
+    // 1. Organizar datos en un objeto: { "2026": ["01"], "2025": ["12", "11"] }
+    availableDates = {};
+    allExpensesData.forEach(({ rowData }) => {
+        const partes = rowData[0].split(' ')[0].split('/');
+        const mes = partes[1]?.padStart(2, '0');
+        const anio = partes[2];
+        
+        if (anio && mes) {
+            if (!availableDates[anio]) availableDates[anio] = new Set();
+            availableDates[anio].add(mes);
+        }
     });
+
+    // 2. Llenar el selector de Años
+    yearSelect.innerHTML = '';
+    const sortedYears = Object.keys(availableDates).sort((a, b) => b - a);
+    
+    sortedYears.forEach(anio => {
+        const option = document.createElement('option');
+        option.value = anio;
+        option.textContent = anio;
+        yearSelect.appendChild(option);
+    });
+
+    // 3. Evento para actualizar meses cuando cambie el año
+    yearSelect.onchange = () => updateMonthsDropdown(yearSelect.value);
+
+    // Inicializar los meses para el primer año de la lista
+    if (sortedYears.length > 0) {
+        updateMonthsDropdown(sortedYears[0]);
+    }
 }
 
+function updateMonthsDropdown(year) {
+    const monthSelect = document.getElementById('export-month-select');
+    monthSelect.innerHTML = '';
+
+    // Obtener meses del año seleccionado y ordenarlos (Diciembre a Enero)
+    const meses = Array.from(availableDates[year]).sort((a, b) => b - a);
+
+    meses.forEach(mNum => {
+        const fecha = new Date(year, mNum - 1);
+        const nombreMes = new Intl.DateTimeFormat('es-CO', { month: 'long' }).format(fecha);
+
+        const option = document.createElement('option');
+        option.value = mNum; // Valor numérico para el filtro (01, 02...)
+        option.textContent = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+        monthSelect.appendChild(option);
+    });
+}
 document.getElementById('download-pdf-btn').onclick = () => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-    const selectedMonth = document.getElementById('export-month-select').value;
 
+    // 1. Obtener valores de los dos selectores
+    const yearSelect = document.getElementById('export-year-select');
+    const monthSelect = document.getElementById('export-month-select');
+    
+    const selectedYear = yearSelect.value;
+    const selectedMonthNum = monthSelect.value; // "01", "02", etc.
+    const selectedMonthName = monthSelect.options[monthSelect.selectedIndex].text; // "Enero", "Febrero", etc.
+
+    // 2. Filtrar datos que coincidan con el AÑO y el MES
     const dataToExport = allExpensesData.filter(({ rowData }) => {
         const partes = rowData[0].split(' ')[0].split('/');
-        const monthKey = `${partes[1]?.padStart(2, '0')}/${partes[2]}`;
-        return monthKey === selectedMonth;
+        const m = partes[1]?.padStart(2, '0');
+        const y = partes[2];
+        return m === selectedMonthNum && y === selectedYear;
     });
 
-    if (dataToExport.length === 0) return alert("No hay datos para este mes");
+    if (dataToExport.length === 0) {
+        return alert(`No hay datos registrados para ${selectedMonthName} de ${selectedYear}`);
+    }
 
     // --- DISEÑO DE CABECERA ---
-    // Rectángulo decorativo superior (Púrpura)
+    // Rectángulo decorativo superior (Mismo color que tenías)
     doc.setFillColor(94, 5, 5);
     doc.rect(0, 0, 210, 40, 'F');
 
@@ -516,10 +616,10 @@ document.getElementById('download-pdf-btn').onclick = () => {
     doc.setTextColor(255, 255, 255);
     doc.text("REPORTE MENSUAL DE GASTOS", 14, 25);
 
-    // Subtítulo con el periodo
+    // Subtítulo con el periodo legible (Ej: "Periodo: Enero 2026")
     doc.setFontSize(12);
     doc.setFont("helvetica", "normal");
-    doc.text(`Periodo: ${selectedMonth}`, 14, 32);
+    doc.text(`Periodo: ${selectedMonthName} ${selectedYear}`, 14, 32);
 
     // Info de generación (Derecha)
     doc.setFontSize(9);
@@ -541,22 +641,29 @@ document.getElementById('download-pdf-btn').onclick = () => {
     doc.line(14, 62, 196, 62);
 
     // --- PREPARACIÓN DE TABLA ---
-    const tableRows = dataToExport.map(({ rowData }) => {
+    // Ordenamos por día antes de exportar
+    const sortedData = dataToExport.sort((a, b) => {
+        const diaA = parseInt(a.rowData[0].split('/')[0]);
+        const diaB = parseInt(b.rowData[0].split('/')[0]);
+        return diaA - diaB;
+    });
+
+    const tableRows = sortedData.map(({ rowData }) => {
         const [fecha, monto, categoria, desc] = rowData;
         return [
-            fecha.split(' ')[0],
+            fecha.split(' ')[0], // Solo la fecha, sin la hora
             desc || 'Sin descripción',
             categoria,
             `$ ${Number(monto).toLocaleString('es-CO')}`
         ];
     });
 
-    // --- GENERACIÓN DE TABLA ELEGANTE ---
+    // --- GENERACIÓN DE TABLA ---
     doc.autoTable({
         startY: 70,
         head: [['FECHA', 'DESCRIPCIÓN', 'CATEGORÍA', 'MONTO']],
         body: tableRows,
-        theme: 'grid', // 'grid' para un look más estructurado y limpio
+        theme: 'grid',
         styles: {
             fontSize: 9,
             cellPadding: 4,
@@ -564,8 +671,8 @@ document.getElementById('download-pdf-btn').onclick = () => {
             font: 'helvetica'
         },
         headStyles: {
-            fillColor: [30, 30, 30], // Fondo oscuro para cabecera
-            textColor: [187, 134, 252], // Texto púrpura
+            fillColor: [30, 30, 30],
+            textColor: [187, 134, 252],
             fontStyle: 'bold',
             halign: 'center'
         },
@@ -578,7 +685,6 @@ document.getElementById('download-pdf-btn').onclick = () => {
         },
         margin: { left: 14, right: 14 },
         didDrawPage: function (data) {
-            // Pie de página en cada hoja
             doc.setFontSize(8);
             doc.setTextColor(150);
             doc.text("Desarrollado por Mytic", 14, doc.internal.pageSize.height - 10);
@@ -587,8 +693,57 @@ document.getElementById('download-pdf-btn').onclick = () => {
     });
 
     // --- DESCARGA ---
-    doc.save(`Reporte_Gastos_${selectedMonth.replace('/', '-')}.pdf`);
+    // Nombre de archivo más limpio: Reporte_Enero_2026.pdf
+    doc.save(`Reporte_Gastos_${selectedMonthName}_${selectedYear}.pdf`);
 };
+
+// Graficos
+function updateChart(filteredData) {
+    const ctx = document.getElementById('expensesChart').getContext('2d');
+    
+    // 1. Agrupar montos por categoría
+    const categoriesMap = {};
+    filteredData.forEach(({ rowData }) => {
+        const monto = Number(rowData[1] || 0);
+        const cat = rowData[2] || 'Otro';
+        categoriesMap[cat] = (categoriesMap[cat] || 0) + monto;
+    });
+
+    const labels = Object.keys(categoriesMap);
+    const dataValues = Object.values(categoriesMap);
+
+    // 2. Si el gráfico ya existe, destrúyelo para que no se encime
+    if (expensesChart) {
+        expensesChart.destroy();
+    }
+
+    // 3. Crear el nuevo gráfico
+    expensesChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: dataValues,
+                backgroundColor: [
+                    '#6501df', '#da2e03', '#ff0266', '#ffde03', '#0336ff', '#4caf50'
+                ],
+                borderWidth: 0,
+                hoverOffset: 10
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { color: '#aaa', font: { size: 12 } }
+                }
+            },
+            cutout: '70%' // Hace que la dona sea más delgada y elegante
+        }
+    });
+}
 
 // Cerrar sesión completo
 signoutBtn.onclick = () => {
@@ -607,6 +762,8 @@ signoutBtn.onclick = () => {
 // --- INICIO DE LA APP ---
 
 document.addEventListener('DOMContentLoaded', () => {
+  updateMonthDisplay();
+  setDefaultDate();
   if (accessToken) {
     // Si ya hay token, vamos directo a la pantalla principal
     showScreen(mainScreen);

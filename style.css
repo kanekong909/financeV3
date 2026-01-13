@@ -166,10 +166,18 @@ header {
   color: var(--secondary-color);
 }
 
+/* Nombre del mes actual */
+#current-month-name {
+    font-size: 14px;
+    display: block;
+    margin-top: 5px;
+    color: #a8a7a7;
+}
+
 /* Busca la sección de Gastos al final y déjala así: */
 #expenses-list {
     display: block;      /* Asegura que se comporte como bloque */
-    max-height: 230px;   /* Altura máxima obligatoria */
+    max-height: 250px;   /* Altura máxima obligatoria */
     overflow-y: auto;    /* Activa scroll vertical */
     overflow-x: hidden;  /* Evita scroll horizontal */
     padding-right: 8px;  /* Espacio para la barra */
@@ -296,3 +304,158 @@ header {
     }
 }
 
+/* BOTON VER MESES ANTERIORES */
+.btn-meses-anteriores {
+  background-color: var(--surface-color);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
+}
+
+/* Historial  */
+/* Contenedor principal del Modal (Fondo oscuro) */
+#history-modal {
+    display: none; /* Se activa con la clase .active */
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+#history-modal.active {
+    display: flex;
+}
+
+/* La tarjeta dentro del modal */
+#history-modal .modal-content {
+    background: #1a1a1a; /* Fondo oscuro sólido o puedes usar tu variable */
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh; /* Evita que se salga de la pantalla (85% del alto) */
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column; /* Organiza header y lista en vertical */
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    overflow: hidden; /* Corta lo que se salga de las esquinas redondeadas */
+}
+
+/* Encabezado fijo */
+#history-modal .modal-header {
+    padding: 20px 24px;
+    background: #222;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#history-modal .modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #bb86fc; /* Tu color púrpura */
+}
+
+/* Lista deslizable */
+#history-list {
+    flex: 1; /* Toma todo el espacio disponible */
+    overflow-y: auto; /* Aquí ocurre la magia del scroll */
+    padding: 10px 20px 20px 20px;
+    
+    /* Scrollbar elegante para Chrome/Safari */
+}
+
+#history-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+#history-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#history-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+/* Estilo para los bloques de meses (Headers internos) */
+.history-month-header {
+    position: sticky; /* Se queda pegado arriba mientras scrolleas ese mes */
+    top: 0;
+    background: #1a1a1a;
+    padding: 15px 0 10px 0;
+    margin-top: 10px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    z-index: 10;
+}
+
+/* Botón cerrar */
+.modal-close {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    color: white;
+    font-size: 24px;
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: 0.2s;
+}
+
+.modal-close:hover {
+    background: rgba(255, 0, 0, 0.2);
+    color: #ff4d4d;
+}
+
+.nombre-mes {
+  color: var(--primary-color);
+}
+
+/* --- ESTILOS DEL GRÁFICO --- */
+
+.chart-section {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.03); /* Fondo sutil */
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: transform 0.3s ease;
+}
+
+/* Contenedor específico del Canvas para controlar el tamaño */
+.chart-container {
+    position: relative;
+    height: 250px; /* Altura fija para que no crezca infinitamente */
+    width: 100%;
+    margin: 15px 0;
+}
+
+/* Ajustes para móviles */
+@media (max-width: 480px) {
+    .chart-container {
+        height: 200px; /* Un poco más pequeño en móviles */
+    }
+}
+
+/* Animación de entrada para el gráfico */
+canvas {
+    animation: fadeInChart 1.2s ease-out;
+}
+
+@keyframes fadeInChart {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
