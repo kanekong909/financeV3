@@ -581,7 +581,7 @@ document.getElementById('download-pdf-btn').onclick = () => {
             // Pie de página en cada hoja
             doc.setFontSize(8);
             doc.setTextColor(150);
-            doc.text("Desarrollado con Simple Sheets App", 14, doc.internal.pageSize.height - 10);
+            doc.text("Desarrollado por Mytic", 14, doc.internal.pageSize.height - 10);
             doc.text(`Página ${data.pageNumber}`, 180, doc.internal.pageSize.height - 10);
         }
     });

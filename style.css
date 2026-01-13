@@ -166,6 +166,29 @@ header {
   color: var(--secondary-color);
 }
 
+/* Busca la sección de Gastos al final y déjala así: */
+#expenses-list {
+    display: block;      /* Asegura que se comporte como bloque */
+    max-height: 230px;   /* Altura máxima obligatoria */
+    overflow-y: auto;    /* Activa scroll vertical */
+    overflow-x: hidden;  /* Evita scroll horizontal */
+    padding-right: 8px;  /* Espacio para la barra */
+    scrollbar-width: thin; /* Para Firefox */
+    scrollbar-color: var(--primary-color) var(--surface-color); /* Para Firefox */
+}
+
+/* Estilo para la barra de scroll en Chrome/Edge/Safari */
+#expenses-list::-webkit-scrollbar {
+    width: 6px;
+}
+#expenses-list::-webkit-scrollbar-thumb {
+    background-color: var(--primary-color);
+    border-radius: 10px;
+}
+#expenses-list::-webkit-scrollbar-track {
+    background: var(--surface-color);
+}
+
 .expense-item {
   display: flex;
   justify-content: space-between;
@@ -173,6 +196,9 @@ header {
   padding: 12px;
   border-bottom: 1px solid var(--border-color);
   gap: 10px;
+}
+.expense-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .expense-info { flex-grow: 1; }
