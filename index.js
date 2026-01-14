@@ -49,18 +49,34 @@ async function inicializarApp() {
 async function obtenerIdHojaUsuario() {
     const token = localStorage.getItem('gapi_token');
     
-    try {
-        // 1. Buscar si ya existe el archivo
-        const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='${CONFIG.NOMBRE_ARCHIVO_DRIVE}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
-        const searchRes = await fetch(searchUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-        const searchData = await searchRes.json();
+    // 1. Intentar leer del caché local (evita duplicados al recargar)
+    const idGuardado = localStorage.getItem('user_spreadsheet_id');
+    if (idGuardado) return idGuardado;
 
-        if (searchData.files && searchData.files.length > 0) {
-            return searchData.files[0].id;
+    try {
+        // 2. Búsqueda exhaustiva en Drive
+        // Buscamos archivos que NO estén en la papelera y sean Spreadsheets
+        const q = `name = '${CONFIG.NOMBRE_ARCHIVO_DRIVE}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id, name, createdTime)`;
+        
+        const res = await fetch(searchUrl, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+
+        // 3. Si existen archivos con ese nombre
+        if (data.files && data.files.length > 0) {
+            // Ordenamos por fecha de creación para agarrar siempre el PRIMERO que se creó en la historia
+            data.files.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+            
+            const idExistente = data.files[0].id;
+            localStorage.setItem('user_spreadsheet_id', idExistente);
+            console.log("Se reutilizará la hoja existente:", idExistente);
+            return idExistente;
         }
 
-        // 2. Si no existe, crear uno nuevo
-        console.log("Creando nueva base de datos en tu Drive...");
+        // 4. Si realmente no existe, lo creamos
+        console.log("No se encontró base de datos. Creando una nueva...");
         const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -69,19 +85,22 @@ async function obtenerIdHojaUsuario() {
                 sheets: [{ properties: { title: CONFIG.NOMBRE_HOJA } }]
             })
         });
+        
         const newSheet = await createRes.json();
         const newId = newSheet.spreadsheetId;
 
-        // 3. Crear cabeceras en la nueva hoja
+        // Inicializar cabeceras
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${newId}/values/${CONFIG.NOMBRE_HOJA}!A1:D1?valueInputOption=USER_ENTERED`, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: [["Fecha", "Monto", "Categoría", "Descripción"]] })
         });
 
+        localStorage.setItem('user_spreadsheet_id', newId);
         return newId;
+
     } catch (error) {
-        console.error("Error en Drive:", error);
+        console.error("Error gestionando Drive:", error);
         return null;
     }
 }

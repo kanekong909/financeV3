@@ -12,12 +12,15 @@ function maybeInitTokenClient() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: '574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com',
         scope: SCOPES,
+        // En auth.js, modifica el callback:
         callback: (response) => {
             if (response.error !== undefined) {
                 console.error("Error en autorización:", response);
                 return;
             }
-            // Guardamos el token y vamos al dashboard
+            // LIMPIEZA: Borramos el ID anterior para que al entrar busque el archivo correcto
+            localStorage.removeItem('user_spreadsheet_id'); 
+            
             localStorage.setItem('gapi_token', response.access_token);
             window.location.href = '../index.html';
         },
