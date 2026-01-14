@@ -1,734 +1,735 @@
-// === CONFIGURACIÓN ===
-const CLIENT_ID = '574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com';
-const SPREADSHEET_ID = '1kKvepYlD-5EBQdC3CQ6-42-pen3YW6mGuZ_9PCjmdW0';
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+// =================================
+// 1. CONFIGURACIÓN Y VARIABLES
+// =================================
+const CONFIG = {
+    SPREADSHEET_ID: '1kKvepYlD-5EBQdC3CQ6-42-pen3YW6mGuZ_9PCjmdW0',
+    NOMBRE_HOJA: 'Gastos',
+    MESES: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+};
 
-// Intentamos recuperar el token del almacenamiento de sesión al cargar
-let accessToken = sessionStorage.getItem('ds_access_token') || null;
-let tokenClient = null;
+let allExpenses = [];
 
-// Filtros
-let allExpensesData = []; // Aquí guardaremos la lista completa
+// VARIABLES PARA TENER ID DE GASTO ESPECIFICO
+let currentEditId = null;
+let currentDeleteId = null;
 
-// Elementos DOM
-const loginScreen = document.getElementById('login-screen');
-const authScreen  = document.getElementById('auth-screen');
-const mainScreen  = document.getElementById('main-screen');
-const authorizeBtn = document.getElementById('authorize-btn');
-const signoutBtn   = document.getElementById('signout-btn');
-const form         = document.getElementById('expense-form');
-const amountInput  = document.getElementById('amount');
-const categorySelect = document.getElementById('category');
-const descInput    = document.getElementById('description');
-const list         = document.getElementById('expenses-list');
-const totalEl      = document.getElementById('total-amount');
-
-// Modal edición
-const editModal = document.getElementById('edit-modal');
-const editForm = document.getElementById('edit-form');
-const editFecha = document.getElementById('edit-fecha');
-const editMonto = document.getElementById('edit-monto');
-const editCategoria = document.getElementById('edit-categoria');
-const editDescripcion = document.getElementById('edit-descripcion');
-let currentRowNumber = null;
-
-// Modal eliminar
-const deleteModal = document.getElementById('delete-modal');
-const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
-let rowToDelete = null; // Variable para guardar temporalmente la fila
-
-// Elegir año y mes para exportar PDF
-// Variable para organizar los datos por año y mes
-let availableDates = {};
-
-// Historial de gastos
-const historyModal = document.getElementById('history-modal');
-const historyList = document.getElementById('history-list');
+// VARIABLE HISTORIAL
+// Variable para el historial completo (sin filtrar por mes)
+let fullHistory = [];
 
 // Graficos
-let expensesChart = null; // Para poder destruir y recrear el gráfico al actualizar
+let myChart = null;
 
-// DETERMINAR MES ACTUAL
-// Obtener mes y año actual en formato "MM/YYYY" para comparar
-function getMonthKey(date = new Date()) {
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${month}/${year}`;
-}
-
-const currentMonthKey = getMonthKey(); // Ej: "01/2026"
-
-// Funcion actualizar nombre del mes en el resumen
-function updateMonthDisplay() {
-    const monthDisplay = document.getElementById('current-month-name');
-    if (monthDisplay) {
-        const opciones = { month: 'long', year: 'numeric' };
-        const nombreMes = new Intl.DateTimeFormat('es-CO', opciones).format(new Date());
-        // Capitalizamos la primera letra
-        monthDisplay.textContent = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+// =================================
+// 2. CONTROL DE FLUJO (INIT)
+// =================================
+document.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('gapi_token');
+    
+    if (!token) {
+        window.location.href = './login.html';
+        return;
     }
-}
-
-// Fecha por defecto
-function setDefaultDate() {
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    document.getElementById('date').value = now.toISOString().slice(0, 16);
-}
-
-// --- LÓGICA DE NAVEGACIÓN ---
-function showScreen(screen) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  screen.classList.add('active');
-}
-
-// --- INTEGRACIÓN GOOGLE IDENTITY SERVICES ---
-
-window.handleCredentialResponse = function(response) {
-  console.log('Login con ID token exitoso');
-  // Una vez logueado con Google, pedimos permiso para Sheets
-  showScreen(authScreen);
-};
-
-function initializeGoogle() {
-  console.log('Inicializando Google SDK...');
-
-  google.accounts.id.initialize({
-    client_id: CLIENT_ID,
-    callback: handleCredentialResponse,
-    auto_select: true,
-    cancel_on_tap_outside: false
-  });
-
-  const signinDiv = document.getElementById("g_id_signin");
-  if (signinDiv) {
-    google.accounts.id.renderButton(signinDiv, { theme: "outline", size: "large" });
-  }
-
-  // Cliente para obtener el Access Token (OAuth2)
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (tokenResponse) => {
-      if (tokenResponse && tokenResponse.access_token) {
-        accessToken = tokenResponse.access_token;
-        // PERSISTENCIA: Guardamos el token para que no se pierda al refrescar
-        sessionStorage.setItem('ds_access_token', accessToken); 
-        
-        showScreen(mainScreen);
-        loadExpenses();
-      }
-    }
-  });
-
-  authorizeBtn.onclick = () => {
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-  };
-}
-
-function waitForGoogle() {
-  if (window.google && window.google.accounts && window.google.accounts.oauth2) {
-    initializeGoogle();
-  } else {
-    setTimeout(waitForGoogle, 100);
-  }
-}
-
-// --- OPERACIONES CON SHEETS ---
-
-async function loadExpenses() {
-  if (!accessToken) return;
-
-  // Mostramos un estado de carga opcional en la lista
-  list.innerHTML = '<p style="text-align:center; color:#888; padding:20px;">Actualizando...</p>';
-
-  try {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/Gastos!A2:D1000`;
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-
-    if (response.status === 401) {
-      sessionStorage.removeItem('ds_access_token');
-      showScreen(loginScreen);
-      return;
-    }
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = await response.json();
-    const rows = data.values || [];
-
-    // 1. GUARDAR EN VARIABLE GLOBAL:
-    // Transformamos los datos y los guardamos para que applyFilters() tenga acceso
-    allExpensesData = rows.map((row, index) => ({
-      rowData: row,
-      rowNumber: index + 2
-    }));
-
-    // 2. DISPARAR FILTROS:
-    // Llamamos a applyFilters en lugar de renderExpenses. 
-    // Esto asegura que si el usuario tiene algo escrito en el buscador, se mantenga aplicado.
-    applyFilters();
-    updateExportSelector()
-
-  } catch (err) {
-    console.error('Error en loadExpenses:', err);
-    list.innerHTML = '<p style="text-align:center; color:red; padding:20px;">Error al conectar con Google Sheets</p>';
-  }
-}
-
-// Agregar gasto
-form.onsubmit = async (e) => {
-    e.preventDefault();
-
-    // 1. Obtener el valor del input datetime-local
-    const dateValue = document.getElementById('date').value; // Ejemplo: "2025-12-29T14:30"
-    if (!dateValue) return;
-
-    // 2. Formatear la fecha para que Sheets la entienda (DD/MM/YYYY HH:mm)
-    const dateObj = new Date(dateValue);
-    const fechaFormateada = dateObj.toLocaleString('es-CO', { 
-        day: '2-digit', month: '2-digit', year: 'numeric', 
-        hour: '2-digit', minute: '2-digit', hour12: false 
-    }).replace(',', '');
-
-    const values = [
-        fechaFormateada,
-        amountInput.value,
-        categorySelect.value,
-        descInput.value.trim() || ''
-    ];
-
-    try {
-        const resp = await fetch(
-            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/Gastos!A:D:append?valueInputOption=USER_ENTERED`,
-            {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ values: [values] })
-            }
-        );
-
-        if (!resp.ok) throw new Error('Error al agregar');
-
-        form.reset();
-        // Opcional: Volver a poner la fecha de hoy por defecto después de limpiar
-        setDefaultDate(); 
-        loadExpenses();
-    } catch (err) {
-        console.error('Error al agregar:', err);
-    }
-};
-
-// Renderizar lista
-function renderExpenses(expensesWithRow) {
-  list.innerHTML = '';
-  let total = 0;
-
-  const formatter = new Intl.NumberFormat('es-CO', {
-    style: 'currency', currency: 'COP',
-    minimumFractionDigits: 0, maximumFractionDigits: 0
-  });
-
-  if (expensesWithRow.length === 0) {
-    list.innerHTML = '<p style="text-align:center;color:#888;padding:20px;">Sin gastos aún</p>';
-  } else {
-    // Invertimos para ver los más recientes arriba
-    expensesWithRow.reverse().forEach(({ rowData, rowNumber }) => {
-      const [fecha, monto, categoria, desc] = rowData;
-      const mNum = Number(monto || 0);
-      const montoFormateado = formatter.format(mNum);
-
-      const item = document.createElement('div');
-      item.className = 'expense-item';
-      item.innerHTML = `
-        <div class="expense-info">
-          <strong>${desc || 'Sin descripción'}</strong>
-          <div class="small">${fecha} • ${categoria}</div>
-        </div>
-        <div class="expense-amount">${montoFormateado}</div>
-        <div class="expense-actions">
-          <button class="btn-edit" title="Editar">
-            <img src="./assets/img/edit.svg" alt="Editar" width="26" height="26">
-          </button>
-          <button class="btn-delete" title="Eliminar">
-            <img src="./assets/img/delete.svg" alt="Eliminar" width="26" height="26">
-          </button>
-        </div>
-      `;
-
-      item.querySelector('.btn-delete').onclick = () => {
-        openDeleteModal(rowNumber); // Ya no usamos confirm()
-      };
-
-      item.querySelector('.btn-edit').onclick = () => {
-        openEditModal(rowNumber, { fecha, monto, categoria, desc });
-      };
-
-      list.appendChild(item);
-      total += mNum;
-    });
-  }
-  totalEl.textContent = formatter.format(total);
-
-  updateChart(expensesWithRow);
-}
-
-// Eliminar gasto
-async function deleteExpense(rowNumber) {
-  try {
-    const request = {
-      requests: [{
-        deleteDimension: {
-          range: {
-            sheetId: 0, // Asegúrate que 'Gastos' sea la pestaña ID 0
-            dimension: "ROWS",
-            startIndex: rowNumber - 1,
-            endIndex: rowNumber
-          }
-        }
-      }]
-    };
-
-    const resp = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(request)
-      }
-    );
-
-    if (!resp.ok) throw new Error('Error al eliminar');
-    loadExpenses();
-  } catch (err) {
-    console.error('Error al eliminar:', err);
-  }
-}
-
-// --- MODAL DE EDICIÓN ---
-function openEditModal(rowNumber, gasto) {
-  currentRowNumber = rowNumber;
-
-  let fechaHoraInput = '';
-  if (gasto.fecha) {
-    try {
-      const [fechaStr, horaStr] = gasto.fecha.split(' ');
-      const [dia, mes, anio] = fechaStr.split('/');
-      fechaHoraInput = `${anio}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}T${horaStr || '12:00'}`;
-    } catch (e) { console.warn('Fecha mal formateada'); }
-  }
-
-  editFecha.value = fechaHoraInput;
-  editMonto.value = gasto.monto;
-  editCategoria.value = gasto.categoria;
-  editDescripcion.value = gasto.desc || '';
-
-  editModal.classList.add('active');
-}
-
-function closeEditModal() {
-  editModal.classList.remove('active');
-  currentRowNumber = null;
-}
-
-document.querySelector('.modal-close')?.addEventListener('click', closeEditModal);
-document.querySelector('.modal-cancel')?.addEventListener('click', closeEditModal);
-
-// Editar
-editForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const dateObj = new Date(editFecha.value);
-  const fechaFormateada = dateObj.toLocaleString('es-CO', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: false
-  }).replace(',', '');
-
-  const values = [
-    fechaFormateada,
-    editMonto.value,
-    editCategoria.value,
-    editDescripcion.value.trim() || ''
-  ];
-
-  try {
-    const resp = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/Gastos!A${currentRowNumber}:D${currentRowNumber}?valueInputOption=USER_ENTERED`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values: [values] })
-      }
-    );
-
-    if (!resp.ok) throw new Error('Error al actualizar');
-
-    closeEditModal();
-    loadExpenses();
-  } catch (err) {
-    console.error('Error al editar:', err);
-  }
+    
+    inicializarApp();
 });
 
-// Eliminar registro
-function openDeleteModal(rowNumber) {
-    rowToDelete = rowNumber;
-    deleteModal.classList.add('active');
+function inicializarApp() {
+    console.log("App iniciada con éxito");
+    actualizarFechaInput();
+    setupFilters();
+    loadExpenses(); // Carga inicial de datos
+    setupFormListener();
 }
 
-function closeDeleteModal() {
-    deleteModal.classList.remove('active');
-    rowToDelete = null;
+// =================================
+// 3. FUNCIONES DE INTERFAZ (UI)
+// =================================
+function actualizarFechaInput() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const dateInput = document.getElementById('date');
+    if (dateInput) dateInput.value = now.toISOString().slice(0, 16);
 }
 
-// Eventos para cerrar
-document.getElementById('cancel-delete-btn').onclick = closeDeleteModal;
-document.getElementById('close-delete-x').onclick = closeDeleteModal;
+function showToast(mensaje, esError = false) {
+    let toast = document.querySelector('.toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+    }
 
-// Evento para confirmar la eliminación
-confirmDeleteBtn.onclick = async () => {
-    if (rowToDelete) {
-        // Deshabilitamos el botón para evitar múltiples clics
-        confirmDeleteBtn.disabled = true;
-        confirmDeleteBtn.textContent = "Eliminando...";
+    toast.style.borderColor = esError ? 'var(--error-color)' : 'var(--primary-color)';
+    toast.innerHTML = `
+        <div class="toast-icon" style="background:${esError ? 'var(--error-color)' : 'var(--primary-color)'}">
+            ${esError ? '!' : '✓'}
+        </div>
+        <span>${mensaje}</span>
+    `;
+
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// =================================
+// 4. LÓGICA DE DATOS (GOOGLE SHEETS)
+// =================================
+async function loadExpenses() {
+    const token = localStorage.getItem('gapi_token');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
+
+    try {
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         
-        await deleteExpense(rowToDelete);
+        const data = await response.json();
         
-        // Restauramos y cerramos
-        confirmDeleteBtn.disabled = false;
-        confirmDeleteBtn.textContent = "Eliminar ahora";
-        closeDeleteModal();
+        // Si hay un error de autenticación (Token expirado)
+        if (data.error) {
+            localStorage.clear();
+            window.location.href = './login.html';
+            return;
+        }
+
+        if (!data.values) {
+            renderExpenses([]);
+            updateTotal([]);
+            return;
+        }
+
+        const ahora = new Date();
+        const mesActual = ahora.getMonth();
+        const anioActual = ahora.getFullYear();
+
+        // 1. Procesar todos los datos primero para tener el historial disponible
+        const todosLosDatosProcesados = data.values.map((row, index) => {
+            const rawDate = row[0] || "";
+            let fechaProcesada;
+
+            if (rawDate.includes('/')) {
+                const partes = rawDate.split(' ')[0].split('/'); 
+                const dia = parseInt(partes[0]);
+                const mes = parseInt(partes[1]) - 1;
+                const anio = parseInt(partes[2]);
+                fechaProcesada = new Date(anio, mes, dia);
+            } else {
+                fechaProcesada = new Date(rawDate);
+            }
+
+            return {
+                id: index + 2,
+                fechaObjeto: fechaProcesada,
+                fechaTexto: rawDate,
+                monto: parseFloat(row[1]) || 0,
+                categoria: row[2] || 'Otros',
+                descripcion: row[3] || ''
+            };
+        });
+
+        // 2. Guardar en las variables globales
+        fullHistory = todosLosDatosProcesados; 
+        
+        // 3. Filtrar solo para la vista principal (Mes actual)
+        allExpenses = todosLosDatosProcesados.filter(expense => {
+            return expense.fechaObjeto.getMonth() === mesActual && 
+                   expense.fechaObjeto.getFullYear() === anioActual;
+        }).reverse();
+        
+        // 4. Renderizar UI
+        renderExpenses(allExpenses);
+        updateTotal(allExpenses);
+
+        // 5. Actualizar selectores de PDF (Sin bloquear la carga)
+        updateExportSelector();
+
+    } catch (error) {
+        console.error("Error crítico en loadExpenses:", error);
+        showToast("Error al conectar con Google Sheets", true);
+    }
+}
+
+function setupFormListener() {
+    const expenseForm = document.getElementById('expense-form');
+    if (!expenseForm) return;
+
+    expenseForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const token = localStorage.getItem('gapi_token');
+        
+        const btn = expenseForm.querySelector('button');
+        const originalText = btn.innerText;
+        btn.innerText = 'Enviando...';
+        btn.disabled = true;
+
+        const values = [[
+            document.getElementById('date').value,
+            document.getElementById('amount').value,
+            document.getElementById('category').value,
+            document.getElementById('description').value
+        ]];
+
+        try {
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A1:append?valueInputOption=USER_ENTERED`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ values })
+            });
+
+            if (!response.ok) throw new Error("Error en la API");
+
+            showToast('¡Gasto guardado con éxito!');
+            expenseForm.reset();
+            actualizarFechaInput();
+            loadExpenses(); // Recargar lista automáticamente tras agregar
+            
+        } catch (err) {
+            showToast('Error: ' + err.message, true);
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    });
+}
+
+// =================================
+// 5. RENDERIZADO Y FILTROS
+// =================================
+function renderExpenses(expenses) {
+    const listElement = document.getElementById('expenses-list');
+    if (!listElement) return;
+    
+    // 1. Limpiar la lista actual
+    listElement.innerHTML = '';
+
+    // 2. ACTUALIZAR EL GRÁFICO 
+    // Usamos los mismos datos que recibe la lista para que el gráfico sea coherente
+    updateChart(expenses); 
+
+    // 3. Renderizar cada item en el HTML
+    expenses.forEach(expense => {
+        const item = document.createElement('div');
+        item.className = 'expense-item';
+        
+        // Escapamos el objeto expense para que el onclick no de errores con comillas
+        const expenseData = JSON.stringify(expense).replace(/"/g, '&quot;');
+
+        item.innerHTML = `
+            <div class="expense-info">
+                <strong>${expense.descripcion || 'Sin descripción'}</strong>
+                <small>${expense.fechaTexto} • ${expense.categoria}</small>
+            </div>
+            <div class="expense-actions">
+                <span class="expense-amount">$${expense.monto.toLocaleString()}</span>
+                <div class="action-buttons">
+                    <button class="btn-icon edit" onclick="openEditModal(${expenseData})">
+                      <img src="./assets/img/edit.svg" alt="Editar" />
+                    </button>
+                    <button class="btn-icon delete" onclick="openDeleteModal(${expense.id})">
+                      <img src="./assets/img/delete.svg" alt="Eliminar" />
+                    </button>
+                </div>
+            </div>
+        `;
+        listElement.appendChild(item);
+    });
+}
+
+function updateTotal(expenses) {
+    const total = expenses.reduce((sum, exp) => sum + exp.monto, 0);
+    const totalElement = document.getElementById('total-amount');
+    const monthElement = document.getElementById('current-month-name');
+    
+    if (totalElement) totalElement.innerText = `$${total.toLocaleString('es-CO', { minimumFractionDigits: 2 })}`;
+    
+    // Esto asegura que el HTML diga "Resumen Enero" (o el mes actual)
+    if (monthElement) {
+        const ahora = new Date();
+        monthElement.innerText = CONFIG.MESES[ahora.getMonth()] + " " + ahora.getFullYear();
+    }
+}
+
+function setupFilters() {
+    const searchInput = document.getElementById('filter-search');
+    const categorySelect = document.getElementById('filter-category');
+
+    const filterData = () => {
+        const searchTerm = searchInput.value.toLowerCase();
+        const categoryTerm = categorySelect.value;
+
+        const filtered = allExpenses.filter(exp => {
+            const matchesSearch = exp.descripcion.toLowerCase().includes(searchTerm);
+            const matchesCategory = categoryTerm === 'All' || exp.categoria === categoryTerm;
+            return matchesSearch && matchesCategory;
+        });
+
+        renderExpenses(filtered);
+        updateTotal(filtered);
+    };
+
+    if (searchInput) searchInput.addEventListener('input', filterData);
+    if (categorySelect) categorySelect.addEventListener('change', filterData);
+}
+
+// =================================
+// 6. ELIMINAR Y EDITAR GASTOS
+// =================================
+// --- ELIMINAR ---
+function openDeleteModal(id) {
+    currentDeleteId = id;
+    document.getElementById('delete-modal').classList.add('active');
+}
+
+document.getElementById('confirm-delete-btn').onclick = async () => {
+    const token = localStorage.getItem('gapi_token');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/Gastos!A${currentDeleteId}:D${currentDeleteId}:clear`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+            showToast("Gasto eliminado");
+            closeModals();
+            loadExpenses();
+        }
+    } catch (error) {
+        showToast("Error al eliminar", true);
     }
 };
 
-// Funcion filtrar
-function applyFilters() {
-    const searchTerm = document.getElementById('filter-search').value.toLowerCase();
-    const categoryTerm = document.getElementById('filter-category').value;
+// --- EDITAR ---
+function openEditModal(expense) {
+    currentEditId = expense.id;
 
-    const filtered = allExpensesData.filter(({ rowData }) => {
-        const [fecha, monto, categoria, desc] = rowData;
-        
-        // --- NUEVA LÓGICA DE FECHA MÁS ROBUSTA ---
-        // 1. Dividimos por espacio para quitar la hora: "10/1/2026 17:00" -> "10/1/2026"
-        const soloFecha = fecha.split(' ')[0];
-        // 2. Dividimos por la barra: ["10", "1", "2026"]
-        const partes = soloFecha.split('/');
-        
-        // 3. Creamos la llave MM/YYYY asegurando que el mes tenga dos dígitos
-        // partes[1] es el mes, partes[2] es el año
-        const mesGasto = partes[1]?.padStart(2, '0');
-        const anioGasto = partes[2];
-        const monthKeyGasto = `${mesGasto}/${anioGasto}`; 
+    // --- CONVERSIÓN DE FECHA PARA EL INPUT ---
+    let fechaParaInput = "";
+    try {
+        // Si la fecha tiene el formato DD/MM/YYYY HH:mm
+        if (expense.fechaTexto && expense.fechaTexto.includes('/')) {
+            const [fechaPart, horaPart] = expense.fechaTexto.split(' ');
+            const [dia, mes, anio] = fechaPart.split('/');
+            
+            // Armamos el formato ISO: YYYY-MM-DD
+            const fechaISO = `${anio}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+            
+            // Si tiene hora, la agregamos; si no, ponemos 00:00
+            const horaISO = horaPart ? horaPart.substring(0, 5) : "00:00";
+            
+            fechaParaInput = `${fechaISO}T${horaISO}`;
+        } else {
+            // Si ya venía en formato ISO desde la base de datos
+            fechaParaInput = new Date(expense.fechaTexto).toISOString().slice(0, 16);
+        }
+    } catch (e) {
+        console.error("Error al formatear fecha para el modal:", e);
+    }
 
-        // Comparación
-        const isCurrentMonth = monthKeyGasto === currentMonthKey;
-        // ------------------------------------------
-
-        const matchesSearch = (desc || "").toLowerCase().includes(searchTerm);
-        const matchesCategory = categoryTerm === "All" || categoria === categoryTerm;
-
-        return isCurrentMonth && matchesSearch && matchesCategory;
-    });
-
-    renderExpenses(filtered);
+    // Asignar los valores a los campos del modal
+    document.getElementById('edit-fecha').value = fechaParaInput;
+    document.getElementById('edit-monto').value = expense.monto;
+    document.getElementById('edit-categoria').value = expense.categoria;
+    document.getElementById('edit-descripcion').value = expense.descripcion;
+    
+    document.getElementById('edit-modal').classList.add('active');
 }
 
-// Escuchar cambios en los inputs de filtro
-document.getElementById('filter-search').addEventListener('input', applyFilters);
-document.getElementById('filter-category').addEventListener('change', applyFilters);
-
-// Historial de gastos
-document.getElementById('view-history-btn').onclick = () => {
-    renderHistory();
-    historyModal.classList.add('active');
-};
-
-document.getElementById('close-history').onclick = () => {
-    historyModal.classList.remove('active');
-};
-
-// Historial 
-function renderHistory() {
-    historyList.innerHTML = '';
+document.getElementById('edit-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem('gapi_token');
     
-    const formatter = new Intl.NumberFormat('es-CO', {
-        style: 'currency', currency: 'COP',
-        minimumFractionDigits: 0, maximumFractionDigits: 0
-    });
+    const values = [[
+        document.getElementById('edit-fecha').value,
+        document.getElementById('edit-monto').value,
+        document.getElementById('edit-categoria').value,
+        document.getElementById('edit-descripcion').value
+    ]];
 
-    // 1. Filtrar: Solo meses que NO son el actual
-    const historyData = allExpensesData.filter(({ rowData }) => {
-        const partes = rowData[0].split(' ')[0].split('/');
-        const monthKeyGasto = `${partes[1]?.padStart(2, '0')}/${partes[2]}`;
-        return monthKeyGasto !== currentMonthKey;
-    });
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/Gastos!A${currentEditId}:D${currentEditId}?valueInputOption=USER_ENTERED`;
 
-    if (historyData.length === 0) {
-        historyList.innerHTML = '<p style="text-align:center; padding:20px; color:var(--text-muted);">No hay gastos de meses anteriores.</p>';
+    try {
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ values })
+        });
+
+        if (response.ok) {
+            showToast("Gasto actualizado");
+            closeModals();
+            loadExpenses();
+        }
+    } catch (error) {
+        showToast("Error al actualizar", true);
+    }
+};
+
+// --- CERRAR MODALES ---
+function closeModals() {
+    document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+}
+
+document.querySelectorAll('.modal-close, .modal-cancel, #cancel-delete-btn, #close-delete-x').forEach(btn => {
+    btn.onclick = closeModals;
+});
+
+// =================================
+// 7. VER HISTORIAL COMPLETO
+// =================================
+// 1. Abrir el historial
+document.getElementById('view-history-btn').onclick = async () => {
+    document.getElementById('history-modal').classList.add('active');
+    await loadFullHistory();
+};
+
+// 2. Cargar todos los datos de Sheets
+async function loadFullHistory() {
+    const token = localStorage.getItem('gapi_token');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
+
+    try {
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+
+        if (data.values) {
+            const ahora = new Date();
+            const mesActual = ahora.getMonth();
+            const anioActual = ahora.getFullYear();
+
+            // Mapeamos y luego FILTRAMOS para que NO sea el mes actual
+            fullHistory = data.values.map((row, index) => {
+                const rawDate = row[0] || "";
+                let fechaProcesada;
+
+                // Lógica de limpieza de fecha (igual que en loadExpenses)
+                if (rawDate.includes('/')) {
+                    const partes = rawDate.split(' ')[0].split('/'); 
+                    const dia = parseInt(partes[0]);
+                    const mes = parseInt(partes[1]) - 1; 
+                    const anio = parseInt(partes[2]);
+                    fechaProcesada = new Date(anio, mes, dia);
+                } else {
+                    fechaProcesada = new Date(rawDate);
+                }
+
+                return {
+                    id: index + 2,
+                    fechaObjeto: fechaProcesada,
+                    fechaTexto: rawDate,
+                    monto: parseFloat(row[1]) || 0,
+                    categoria: row[2],
+                    descripcion: row[3] || ''
+                };
+            })
+            .filter(expense => {
+                // EXCLUIR MES ACTUAL: 
+                // Solo pasa si el mes es diferente O el año es diferente al actual
+                const esMesActual = expense.fechaObjeto.getMonth() === mesActual && 
+                                   expense.fechaObjeto.getFullYear() === anioActual;
+                
+                return !esMesActual; // Solo devolvemos los que NO son del mes actual
+            })
+            .reverse();
+            
+            renderHistory(fullHistory);
+        }
+    } catch (error) {
+        console.error("Error cargando historial:", error);
+        showToast("Error al cargar el historial", true);
+    }
+}
+
+// 3. Renderizar el historial en el modal
+function renderHistory(data) {
+    const container = document.getElementById('history-list-container');
+    container.innerHTML = '';
+
+    data.forEach(expense => {
+        const item = document.createElement('div');
+        item.className = 'expense-item'; 
+        // Reutilizamos la clase expense-item para mantener el estilo
+        item.innerHTML = `
+            <div class="expense-info">
+                <strong>${expense.descripcion}</strong>
+                <small>${expense.fechaTexto} • ${expense.categoria}</small>
+            </div>
+            <div class="expense-actions">
+                <span class="expense-amount">$${expense.monto.toLocaleString()}</span>
+                <div class="action-buttons" style="opacity: 1;"> 
+                    <button class="btn-icon edit" onclick="openEditFromHistory(${JSON.stringify(expense).replace(/"/g, '&quot;')})">
+                      <img src="./assets/img/edit.svg" alt="Editar" />
+                    </button>
+                    <button class="btn-icon delete" onclick="openDeleteModal(${expense.id})">
+                      <img src="./assets/img/delete.svg" alt="Eliminar" />
+                    </button>
+                </div>
+            </div>
+        `;
+        container.appendChild(item);
+    });
+}
+
+// 4. Puente para editar desde el historial
+function openEditFromHistory(expense) {
+    // Cerramos el modal de historial para que no estorbe al de edición
+    document.getElementById('history-modal').classList.remove('active');
+    openEditModal(expense);
+}
+
+// 5. Buscador interno del historial
+document.getElementById('history-search').oninput = (e) => {
+    const term = e.target.value.toLowerCase();
+    const filtered = fullHistory.filter(exp => 
+        exp.descripcion.toLowerCase().includes(term) || 
+        exp.categoria.toLowerCase().includes(term)
+    );
+    renderHistory(filtered);
+};
+
+// Cerrar el modal
+document.getElementById('close-history').onclick = () => {
+    document.getElementById('history-modal').classList.remove('active');
+};
+
+async function loadFullHistoryQuiet() {
+    const token = localStorage.getItem('gapi_token');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
+    try {
+        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await response.json();
+        if (data.values) {
+            fullHistory = data.values.map((row, index) => ({
+                id: index + 2,
+                fechaObjeto: row[0].includes('/') ? 
+                    new Date(row[0].split(' ')[0].split('/').reverse().join('-')) : new Date(row[0]),
+                fechaTexto: row[0],
+                monto: parseFloat(row[1]) || 0,
+                categoria: row[2],
+                descripcion: row[3] || ''
+            }));
+        }
+    } catch (e) { console.log("Error silencioso", e); }
+}
+
+// =================================
+// DESCARGAR PDF
+// =================================
+// --- CONFIGURACIÓN DE SELECTORES DE EXPORTACIÓN ---
+function updateExportSelector() {
+    const yearSelect = document.getElementById('export-year-select');
+    
+    // Unimos todos los datos para buscar años
+    const todosLosDatos = [...allExpenses, ...fullHistory];
+    
+    // Obtenemos años únicos
+    const añosExistentes = [...new Set(todosLosDatos.map(exp => 
+        new Date(exp.fechaObjeto).getFullYear()
+    ))].sort((a, b) => b - a); // Ordenar de más reciente a más viejo
+
+    if (añosExistentes.length === 0) {
+        // Si no hay datos, ponemos al menos el año actual
+        añosExistentes.push(new Date().getFullYear());
+    }
+
+    yearSelect.innerHTML = añosExistentes.map(año => 
+        `<option value="${año}">${año}</option>`
+    ).join('');
+
+    // Cuando cambie el año, actualizamos los meses disponibles
+    yearSelect.onchange = () => updateMonthsDropdown(yearSelect.value);
+    
+    // Carga inicial de meses para el primer año de la lista
+    updateMonthsDropdown(yearSelect.value);
+}
+
+function updateMonthsDropdown(yearSelected) {
+    const monthSelect = document.getElementById('export-month-select');
+    const todosLosDatos = [...allExpenses, ...fullHistory];
+    
+    // 1. Filtrar gastos que pertenecen al año seleccionado
+    const gastosDelAño = todosLosDatos.filter(exp => 
+        new Date(exp.fechaObjeto).getFullYear() == yearSelected
+    );
+
+    // 2. Obtener los índices de los meses únicos (0-11) que tienen registros
+    const mesesConDatos = [...new Set(gastosDelAño.map(exp => 
+        new Date(exp.fechaObjeto).getMonth()
+    ))].sort((a, b) => a - b); // Ordenar de Enero a Diciembre
+
+    // 3. Llenar el selector solo con esos meses
+    if (mesesConDatos.length > 0) {
+        monthSelect.innerHTML = mesesConDatos.map(monthIndex => 
+            `<option value="${monthIndex}">${CONFIG.MESES[monthIndex]}</option>`
+        ).join('');
+    } else {
+        monthSelect.innerHTML = `<option value="">Sin registros</option>`;
+    }
+}
+
+// --- GENERACIÓN DEL PDF ---
+document.getElementById('download-pdf-btn').onclick = async () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
+    
+    const year = document.getElementById('export-year-select').value;
+    const monthIndex = document.getElementById('export-month-select').value;
+    const monthName = CONFIG.MESES[monthIndex];
+
+    const reportData = [...allExpenses, ...fullHistory].filter(exp => {
+        const d = new Date(exp.fechaObjeto);
+        return d.getFullYear() == year && d.getMonth() == monthIndex;
+    }).sort((a, b) => a.fechaObjeto - b.fechaObjeto);
+
+    if (reportData.length === 0) {
+        showToast("No hay datos para este periodo", true);
         return;
     }
 
-    // 2. AGRUPAR por mes
-    const groups = {};
-    historyData.forEach(item => {
-        const partes = item.rowData[0].split(' ')[0].split('/');
-        const key = `${partes[1]?.padStart(2, '0')}/${partes[2]}`; // MM/YYYY
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(item);
-    });
-
-    // 3. ORDENAR las llaves de los meses (de más reciente a más antiguo)
-    const sortedMonthKeys = Object.keys(groups).sort((a, b) => {
-        const [mA, yA] = a.split('/').map(Number);
-        const [mB, yB] = b.split('/').map(Number);
-        return (yB - yA) || (mB - mA); // Orden descendente
-    });
-
-    // 4. RENDERIZAR por grupos
-    sortedMonthKeys.forEach(monthKey => {
-        // Crear separador de mes
-        const [m, y] = monthKey.split('/');
-        const nombreMes = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' })
-                          .format(new Date(y, m - 1));
-        
-        const header = document.createElement('div');
-        header.className = 'history-month-header';
-        header.innerHTML = `<span class="nombre-mes">${nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1)}</span>`;
-        historyList.appendChild(header);
-
-        // Renderizar gastos de ese mes (dentro del mes, los más recientes arriba)
-        groups[monthKey].reverse().forEach(({ rowData }) => {
-            const [fecha, monto, categoria, desc] = rowData;
-            const item = document.createElement('div');
-            item.className = 'expense-item';
-            item.innerHTML = `
-                <div class="expense-info">
-                    <strong>${desc || 'Sin descripción'}</strong>
-                    <div class="small">${fecha} • ${categoria}</div>
-                </div>
-                <div class="expense-amount">${formatter.format(Number(monto))}</div>
-            `;
-            historyList.appendChild(item);
-        });
-    });
-}
-
-// Exportar PDF
-function updateExportSelector() {
-    const yearSelect = document.getElementById('export-year-select');
-    const monthSelect = document.getElementById('export-month-select');
-    if (!yearSelect || !monthSelect) return;
-
-    // 1. Organizar datos en un objeto: { "2026": ["01"], "2025": ["12", "11"] }
-    availableDates = {};
-    allExpensesData.forEach(({ rowData }) => {
-        const partes = rowData[0].split(' ')[0].split('/');
-        const mes = partes[1]?.padStart(2, '0');
-        const anio = partes[2];
-        
-        if (anio && mes) {
-            if (!availableDates[anio]) availableDates[anio] = new Set();
-            availableDates[anio].add(mes);
-        }
-    });
-
-    // 2. Llenar el selector de Años
-    yearSelect.innerHTML = '';
-    const sortedYears = Object.keys(availableDates).sort((a, b) => b - a);
-    
-    sortedYears.forEach(anio => {
-        const option = document.createElement('option');
-        option.value = anio;
-        option.textContent = anio;
-        yearSelect.appendChild(option);
-    });
-
-    // 3. Evento para actualizar meses cuando cambie el año
-    yearSelect.onchange = () => updateMonthsDropdown(yearSelect.value);
-
-    // Inicializar los meses para el primer año de la lista
-    if (sortedYears.length > 0) {
-        updateMonthsDropdown(sortedYears[0]);
-    }
-}
-
-function updateMonthsDropdown(year) {
-    const monthSelect = document.getElementById('export-month-select');
-    monthSelect.innerHTML = '';
-
-    // Obtener meses del año seleccionado y ordenarlos (Diciembre a Enero)
-    const meses = Array.from(availableDates[year]).sort((a, b) => b - a);
-
-    meses.forEach(mNum => {
-        const fecha = new Date(year, mNum - 1);
-        const nombreMes = new Intl.DateTimeFormat('es-CO', { month: 'long' }).format(fecha);
-
-        const option = document.createElement('option');
-        option.value = mNum; // Valor numérico para el filtro (01, 02...)
-        option.textContent = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
-        monthSelect.appendChild(option);
-    });
-}
-document.getElementById('download-pdf-btn').onclick = () => {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-
-    // 1. Obtener valores de los dos selectores
-    const yearSelect = document.getElementById('export-year-select');
-    const monthSelect = document.getElementById('export-month-select');
-    
-    const selectedYear = yearSelect.value;
-    const selectedMonthNum = monthSelect.value; // "01", "02", etc.
-    const selectedMonthName = monthSelect.options[monthSelect.selectedIndex].text; // "Enero", "Febrero", etc.
-
-    // 2. Filtrar datos que coincidan con el AÑO y el MES
-    const dataToExport = allExpensesData.filter(({ rowData }) => {
-        const partes = rowData[0].split(' ')[0].split('/');
-        const m = partes[1]?.padStart(2, '0');
-        const y = partes[2];
-        return m === selectedMonthNum && y === selectedYear;
-    });
-
-    if (dataToExport.length === 0) {
-        return alert(`No hay datos registrados para ${selectedMonthName} de ${selectedYear}`);
+    // --- 1. FONDO CON DEGRADADO ---
+    // Simulamos un degradado dibujando rectángulos finos de oscuro a un poco más claro
+    for (let i = 0; i < pageHeight; i++) {
+        const factor = i / pageHeight;
+        // De un azul/negro profundo (18, 18, 18) a un violeta muy oscuro (30, 20, 50)
+        const r = Math.floor(18 + factor * 12);
+        const g = Math.floor(18 + factor * 2);
+        const b = Math.floor(18 + factor * 32);
+        doc.setDrawColor(r, g, b);
+        doc.line(0, i, pageWidth, i);
     }
 
-    // --- DISEÑO DE CABECERA ---
-    // Rectángulo decorativo superior (Mismo color que tenías)
-    doc.setFillColor(94, 5, 5);
-    doc.rect(0, 0, 210, 40, 'F');
-
-    // Título Principal
+    // --- 2. ENCABEZADO PREMIUM ---
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(255, 255, 255);
-    doc.text("REPORTE MENSUAL DE GASTOS", 14, 25);
-
-    // Subtítulo con el periodo legible (Ej: "Periodo: Enero 2026")
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Periodo: ${selectedMonthName} ${selectedYear}`, 14, 32);
-
-    // Info de generación (Derecha)
-    doc.setFontSize(9);
-    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 160, 32);
-
-    // --- RESUMEN RÁPIDO ---
-    let total = dataToExport.reduce((acc, { rowData }) => acc + Number(rowData[1] || 0), 0);
+    doc.setFontSize(28);
+    doc.setTextColor(187, 134, 252); // Tu primary color (Lila)
+    doc.text("Mis Gastos", 14, 25);
     
-    doc.setTextColor(40, 40, 40);
     doc.setFontSize(10);
-    doc.text("RESUMEN GENERAL", 14, 50);
+    doc.setTextColor(150, 150, 150);
+    doc.setFont("helvetica", "normal");
+    doc.text("REPORTE FINANCIERO MENSUAL", 14, 32);
+
+    // --- 3. TARJETA DE RESUMEN (Glassmorphism effect) ---
+    const totalMes = reportData.reduce((sum, exp) => sum + exp.monto, 0);
     
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Total Gastado: $ ${total.toLocaleString('es-CO')}`, 14, 58);
+    doc.setFillColor(40, 40, 40); // Color de fondo de la tarjeta
+    doc.roundedRect(14, 40, pageWidth - 28, 30, 3, 3, 'F');
     
-    // Línea divisoria sutil
-    doc.setDrawColor(200, 200, 200);
-    doc.line(14, 62, 196, 62);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(12);
+    doc.text(`Periodo: ${monthName} ${year}`, 20, 52);
+    
+    doc.setFontSize(16);
+    doc.setTextColor(187, 134, 252);
+    doc.text(`Total: $${totalMes.toLocaleString('es-CO')}`, 20, 62);
 
-    // --- PREPARACIÓN DE TABLA ---
-    // Ordenamos por día antes de exportar
-    const sortedData = dataToExport.sort((a, b) => {
-        const diaA = parseInt(a.rowData[0].split('/')[0]);
-        const diaB = parseInt(b.rowData[0].split('/')[0]);
-        return diaA - diaB;
-    });
-
-    const tableRows = sortedData.map(({ rowData }) => {
-        const [fecha, monto, categoria, desc] = rowData;
-        return [
-            fecha.split(' ')[0], // Solo la fecha, sin la hora
-            desc || 'Sin descripción',
-            categoria,
-            `$ ${Number(monto).toLocaleString('es-CO')}`
-        ];
-    });
-
-    // --- GENERACIÓN DE TABLA ---
+    // --- 4. TABLA ESTILO OSCURO ---
     doc.autoTable({
-        startY: 70,
-        head: [['FECHA', 'DESCRIPCIÓN', 'CATEGORÍA', 'MONTO']],
-        body: tableRows,
-        theme: 'grid',
-        styles: {
-            fontSize: 9,
-            cellPadding: 4,
-            valign: 'middle',
-            font: 'helvetica'
-        },
+        startY: 80,
+        head: [['FECHA', 'CATEGORÍA', 'DESCRIPCIÓN', 'MONTO']],
+        body: reportData.map(exp => [
+            exp.fechaTexto.split(' ')[0],
+            exp.categoria.toUpperCase(),
+            exp.descripcion || '-',
+            `$${exp.monto.toLocaleString('es-CO')}`
+        ]),
+        theme: 'plain', // Usamos plain para controlar nosotros los colores
         headStyles: {
             fillColor: [30, 30, 30],
             textColor: [187, 134, 252],
             fontStyle: 'bold',
-            halign: 'center'
+            fontSize: 11,
+            halign: 'center',
+            lineWidth: 0.1,
+            lineColor: [60, 60, 60]
         },
-        columnStyles: {
-            0: { halign: 'center', cellWidth: 25 },
-            3: { halign: 'right', fontStyle: 'bold', cellWidth: 35 }
+        bodyStyles: {
+            fillColor: [25, 25, 25],
+            textColor: [230, 230, 230],
+            fontSize: 10,
+            lineWidth: 0.1,
+            lineColor: [45, 45, 45]
         },
         alternateRowStyles: {
-            fillColor: [250, 250, 250]
+            fillColor: [32, 32, 32]
         },
-        margin: { left: 14, right: 14 },
-        didDrawPage: function (data) {
-            doc.setFontSize(8);
-            doc.setTextColor(150);
-            doc.text("Desarrollado por Mytic", 14, doc.internal.pageSize.height - 10);
-            doc.text(`Página ${data.pageNumber}`, 180, doc.internal.pageSize.height - 10);
-        }
+        columnStyles: {
+            3: { halign: 'right', fontStyle: 'bold', textColor: [255, 255, 255] }
+        },
+        margin: { left: 14, right: 14 }
     });
 
-    // --- DESCARGA ---
-    // Nombre de archivo más limpio: Reporte_Enero_2026.pdf
-    doc.save(`Reporte_Gastos_${selectedMonthName}_${selectedYear}.pdf`);
-};
-
-// Graficos
-function updateChart(filteredData) {
-    const ctx = document.getElementById('expensesChart').getContext('2d');
-    
-    // 1. Agrupar montos por categoría
-    const categoriesMap = {};
-    filteredData.forEach(({ rowData }) => {
-        const monto = Number(rowData[1] || 0);
-        const cat = rowData[2] || 'Otro';
-        categoriesMap[cat] = (categoriesMap[cat] || 0) + monto;
-    });
-
-    const labels = Object.keys(categoriesMap);
-    const dataValues = Object.values(categoriesMap);
-
-    // 2. Si el gráfico ya existe, destrúyelo para que no se encime
-    if (expensesChart) {
-        expensesChart.destroy();
+    // --- 5. PIE DE PÁGINA ---
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(
+            `Generado el ${new Date().toLocaleDateString()} • Página ${i} de ${totalPages}`,
+            pageWidth / 2,
+            pageHeight - 10,
+            { align: 'center' }
+        );
     }
 
-    // 3. Crear el nuevo gráfico
-    expensesChart = new Chart(ctx, {
-        type: 'doughnut',
+    doc.save(`Reporte_Premium_${monthName}.pdf`);
+    showToast("Reporte elegante generado");
+};
+
+// =================================
+// GRAFICOS
+// =================================
+function updateChart(expenses) {
+    const ctx = document.getElementById('expensesChart');
+    if (!ctx) return;
+
+    // 1. Agrupar montos por categoría
+    const categoriasMap = {};
+    expenses.forEach(exp => {
+        const cat = exp.categoria || 'Otros';
+        categoriasMap[cat] = (categoriasMap[cat] || 0) + exp.monto;
+    });
+
+    const labels = Object.keys(categoriasMap);
+    const data = Object.values(categoriasMap);
+
+    // 2. Si el gráfico ya existe, lo destruimos para crearlo de nuevo con datos frescos
+    if (myChart) {
+        myChart.destroy();
+    }
+
+    // 3. Configuración del gráfico
+    myChart = new Chart(ctx, {
+        type: 'doughnut', // Estilo dona (más moderno que el de torta normal)
         data: {
             labels: labels,
             datasets: [{
-                data: dataValues,
+                data: data,
                 backgroundColor: [
-                    '#6501df', '#da2e03', '#ff0266', '#ffde03', '#0336ff', '#4caf50'
+                    '#5600bf', // Lila (tu color principal)
+                    '#15da03', // Turquesa
+                    '#ff0266', // Rosa neón
+                    '#cf6679', // Coral
+                    '#03a9f4', // Azul
+                    '#ffeb3b'  // Amarillo
                 ],
-                borderWidth: 0,
-                hoverOffset: 10
+                borderWidth: 0, // Sin bordes para un look más limpio
+                hoverOffset: 15 // Efecto al pasar el mouse
             }]
         },
         options: {
@@ -737,40 +738,32 @@ function updateChart(filteredData) {
             plugins: {
                 legend: {
                     position: 'bottom',
-                    labels: { color: '#aaa', font: { size: 12 } }
+                    labels: {
+                        color: '#e0e0e0', // Texto claro para modo oscuro
+                        padding: 20,
+                        font: { size: 12 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const value = context.raw;
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return ` $${value.toLocaleString()} (${percentage}%)`;
+                        }
+                    }
                 }
             },
-            cutout: '70%' // Hace que la dona sea más delgada y elegante
+            cutout: '70%' // Hace el hueco central más grande
         }
     });
 }
 
-// Cerrar sesión completo
-signoutBtn.onclick = () => {
-  if (accessToken) {
-    google.accounts.oauth2.revoke(accessToken, () => {
-      accessToken = null;
-      sessionStorage.removeItem('ds_access_token');
-      google.accounts.id.disableAutoSelect();
-      showScreen(loginScreen);
-    });
-  } else {
-    showScreen(loginScreen);
-  }
-};
-
-// --- INICIO DE LA APP ---
-
-document.addEventListener('DOMContentLoaded', () => {
-  updateMonthDisplay();
-  setDefaultDate();
-  if (accessToken) {
-    // Si ya hay token, vamos directo a la pantalla principal
-    showScreen(mainScreen);
-    loadExpenses();
-  } else {
-    // Si no, mostramos login
-    showScreen(loginScreen);
-  }
-  waitForGoogle();
+// =================================
+// 6. EVENTOS DE SALIDA
+// =================================
+document.getElementById('signout-btn')?.addEventListener('click', () => {
+    localStorage.clear();
+    window.location.href = './login.html';
 });

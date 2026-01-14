@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Mytic Expenses</title>
+    <link rel="stylesheet" href="./../assets/css/login.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+    <main class="login-container">
+        <section id="login-card">
+            <div class="logo">
+                <div class="icon-circle">
+                    <img src="./../assets/img/money.svg" alt="Logo">
+                </div>
+                <h1>Mis<span>Gastos</span></h1>
+            </div>
+            
+            <p class="tagline">Controla tus gastos, domina tus finanzas.</p>
+
+            <div class="auth-wrapper">
+                <div id="g_id_onload"
+                     data-client_id="574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com"
+                     data-callback="handleCredentialResponse"
+                     data-auto_prompt="false">
+                </div>
+                <div class="g_id_signin" 
+                    data-type="standard" 
+                    data-shape="pill" 
+                    data-theme="outline"  data-text="signin_with" 
+                    data-size="large" 
+                    data-logo_alignment="left"
+                    data-width="300"> </div>
+            </div>
+
+            <footer class="login-footer">
+                <p>Seguro y sincronizado con Google Sheets</p>
+            </footer>
+        </section>
+    </main>
+
+    <script>
+        function handleCredentialResponse(response) {
+            console.log("Token de identidad recibido");
+            
+            // 1. Guardamos el ID Token (contiene nombre, foto y email del usuario)
+            localStorage.setItem('userToken', response.credential);
+            
+            // 2. Redirigimos a la pantalla de permisos de Sheets
+            window.location.href = './templates/auth.html'; 
+        }
+    </script>
+</body>
+</html>

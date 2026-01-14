@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autorización - Mytic Expenses</title>
+    <link rel="stylesheet" href="./../assets/css/auth.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+    <main class="auth-container">
+        <section id="auth-card">
+            <div class="header-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </div>
+
+            <h2>Autorización requerida</h2>
+            <p>Para guardar tus gastos, necesitamos permiso para crear y editar una hoja de cálculo en tu cuenta de Google.</p>
+            
+            <div class="permissions-list">
+                <div class="permission-item">
+                    <span>✓</span> Uso de Google Sheets
+                </div>
+                <div class="permission-item">
+                    <span>✓</span> Guardado automático
+                </div>
+            </div>
+
+            <button id="authorize-btn" class="btn-authorize">
+                Conectar con Google Sheets
+            </button>
+            
+            <a href="../login.html" class="link-back">Volver al inicio</a>
+        </section>
+    </main>
+
+    <script src="./../assets/js/auth.js"></script>
+</body>
+</html>

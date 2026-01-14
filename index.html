@@ -12,62 +12,28 @@
   <!-- Nota: quitamos apis.google.com/js/api.js porque usaremos fetch + token -->
 </head>
 <body>
-
-    <div class="container" id="app">
-        <!-- Pantalla de login -->
-        <div id="login-screen" class="screen active">
-        <div class="card">
-            <h1>Gastos Diarios</h1>
-            <p>Inicia sesión con Google para guardar tus gastos</p>
-
-            <!-- Inicialización automática (OBLIGATORIO para botón) -->
-            <div id="g_id_onload"
-                data-client_id="574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com"
-                data-callback="handleCredentialResponse"
-                data-auto_prompt="false">
-            </div>
-
-            <!-- Botón renderizado automáticamente -->
-            <div class="g_id_signin"
-                data-type="standard"
-                data-size="large"
-                data-theme="outline"
-                data-text="sign_in_with"
-                data-shape="rectangular"
-                data-logo_alignment="left">
-            </div>
-        </div>
-        </div>
-
-        <!-- Pantalla de autorización (Sheets) -->
-        <div id="auth-screen" class="screen">
-        <div class="card">
-            <h2>Autorización requerida</h2>
-            <p>La app necesita permiso para escribir en tu Google Sheets</p>
-            <button id="authorize-btn" class="btn primary">Autorizar Google Sheets</button>
-        </div>
-        </div>
-
-        <!-- Pantalla principal -->
-        <div id="main-screen" class="screen">
+    <!-- Pantalla principal -->
+    <div id="main-screen">
         <header>
             <h1>Mis Gastos</h1>
             <button id="signout-btn" class="btn small">Cerrar sesión</button>
         </header>
 
-        <div class="grid">
-            <!-- Formulario -->
+        <main class="main-content">
+            <div class="grid">
+            <!-- Columna izquierda: Formulario -->
             <section class="card form-section">
-                <h2>Nuevo gasto</h2>
+                <h2>Registrar nuevo gasto</h2>
+                <!-- Formulario -->
                 <form id="expense-form">
                     <div class="form-group">
-                        <label for="date">Fecha y Hora</label>
+                        <label for="date">Fecha y hora</label>
                         <input type="datetime-local" id="date" required>
                     </div>
 
                     <div class="form-group">
                         <label for="amount">Monto</label>
-                        <input type="number" id="amount" placeholder="Monto" step="0.01" required/>
+                        <input type="number" id="amount" placeholder="Ej: 15000" step="0.01" required>
                     </div>
 
                     <div class="form-group">
@@ -85,82 +51,76 @@
 
                     <div class="form-group">
                         <label for="description">Descripción</label>
-                        <input type="text" id="description" placeholder="Descripción (opcional)"/>
+                        <input type="text" id="description" placeholder="Ej: Almuerzo con amigos">
                     </div>
 
-                    <button type="submit" class="btn primary">Agregar gasto</button>
+                    <button type="submit" class="btn primary full-width">Agregar gasto</button>
                 </form>
             </section>
 
-            <!-- Lista y total -->
+            <!-- Columna derecha: Resumen + lista + filtros -->
             <section class="card list-section">
-                <div class="total">
-                    <h2>Resumen 
-                        <span id="current-month-name"></span>
-                    </h2>
-                    <div id="total-amount">$0.00</div>
+                <!-- Resumen -->
+                <div class="total-card">
+                <h2>Resumen <span id="current-month-name"></span></h2>
+                <div id="total-amount">$0</div>
                 </div>
 
                 <!-- Filtros -->
                 <div class="filters-container">
-                    <input type="text" id="filter-search" placeholder="Buscar por descripción...">
-                    <select id="filter-category">
-                        <option value="All">Todas las categorías</option>
-                        <option>Comida</option>
-                        <option>Transporte</option>
-                        <option>Entretenimiento</option>
-                        <option>Compras</option>
-                        <option>Salud</option>
-                        <option>Otro</option>
-                    </select>
+                <input type="text" id="filter-search" placeholder="Buscar descripción...">
+                <select id="filter-category">
+                    <option value="All">Todas las categorías</option>
+                    <option>Comida</option>
+                    <option>Transporte</option>
+                    <option>Entretenimiento</option>
+                    <option>Compras</option>
+                    <option>Salud</option>
+                    <option>Otro</option>
+                </select>
                 </div>
 
-                <!-- Lista de gastos -->
+                <!-- Lista de gastos (con scroll controlado) -->
                 <div id="expenses-list" class="expenses"></div>
             </section>
-
-            <!-- Historial meses anteriores -->
-            <div class="btn-meses-anteriores" style="text-align: center;">
-                <button type="button" class="btn secondary" id="view-history-btn">Ver meses anteriores</button>
             </div>
 
-            <!-- Historial Modal -->
-            <div id="history-modal" class="modal">
-                <div class="modal-content" style="max-width: 600px;">
-                    <div class="modal-header">
-                        <h2>Historial Completo</h2>
-                        <button type="button" class="modal-close" id="close-history">×</button>
-                    </div>
-                    <div id="history-list" class="expenses" style="max-height: 400px;"></div>
-                </div>
-            </div>
-
-            <!-- PDF Export -->
-            <div class="pdf-section card" style="display: flex; gap: 10px; align-items: flex-end;">
-                <div class="pdf-section card" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-                    <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
-                        <label>Año:</label>
-                        <select id="export-year-select"></select>
-                    </div>
-                    <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
-                        <label>Mes:</label>
-                        <select id="export-month-select"></select>
-                    </div>
-                    <button type="button" class="btn" style="background-color: #ff4d4d; color: white; height: 45px;" id="download-pdf-btn">
-                        Descargar PDF
+            <!-- Secciones inferiores (historial, PDF, gráfico) -->
+            <div class="bottom-sections">
+                <!-- Historial -->
+                <div class="history-section">
+                    <button type="button" class="btn secondary full-width" id="view-history-btn">
+                    Ver meses anteriores
                     </button>
                 </div>
-            </div>
 
-            <!-- Grafica de gastos -->
-            <div class="chart-section">
-                <div class="chart-container">
-                    <h2>Gráfico de Gastos</h2>
+                <!-- Exportar PDF -->
+                <div class="pdf-section card">
+                    <h3>Exportar reporte</h3>
+                    <div class="pdf-controls">
+                        <div class="form-group">
+                            <label>Año</label>
+                            <select id="export-year-select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Mes</label>
+                            <select id="export-month-select"></select>
+                        </div>
+                        <button type="button" class="btn danger full-width" id="download-pdf-btn">
+                            Descargar PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Gráfico -->
+                <div class="chart-section card">
+                    <h3>Distribución de gastos</h3>
+                    <div class="chart-container">
                     <canvas id="expensesChart"></canvas>
+                    </div>
                 </div>
             </div>
-        </div>
-        </div>
+        </main>
     </div>
 
     <!-- Modal de edición -->
@@ -219,6 +179,22 @@
                 <button type="button" class="btn secondary" id="cancel-delete-btn">Cancelar</button>
                 <button type="button" class="btn" style="background-color: var(--error-color); color: white;" id="confirm-delete-btn">Eliminar ahora</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Modal historial -->
+    <div id="history-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;"> <div class="modal-header">
+                <h2>Historial Completo</h2>
+                <button type="button" class="modal-close" id="close-history">×</button>
+            </div>
+            
+            <div class="filters-container" style="margin-bottom: 20px;">
+                <input type="text" id="history-search" placeholder="Buscar en historial...">
+            </div>
+
+            <div id="history-list-container" style="max-height: 60vh; overflow-y: auto;">
+                </div>
         </div>
     </div>
 

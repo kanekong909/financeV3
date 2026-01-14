@@ -1,0 +1,101 @@
+/* RESET Y VARIABLES */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --bg-dark: #050505;
+    --purple-neon: #bb86fc;
+    --purple-deep: #2d0b31;
+    --glass: rgba(255, 255, 255, 0.05);
+}
+
+body {
+    background-color: var(--bg-dark);
+    font-family: 'Segoe UI', sans-serif;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.auth-container { width: 100%; max-width: 450px; padding: 20px; }
+
+#auth-card {
+    background: linear-gradient(145deg, #121212, #000);
+    padding: 50px 30px;
+    border-radius: 32px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 30px 60px rgba(0,0,0,0.8);
+}
+
+/* ICONO ANIMADO */
+.header-icon {
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 25px;
+    color: var(--purple-neon);
+    filter: drop-shadow(0 0 8px var(--purple-neon));
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.1); opacity: 1; }
+    100% { transform: scale(1); opacity: 0.8; }
+}
+
+h2 { font-size: 24px; margin-bottom: 15px; }
+
+p { color: rgba(255, 255, 255, 0.6); font-size: 15px; line-height: 1.6; margin-bottom: 30px; }
+
+/* LISTA DE PERMISOS */
+.permissions-list {
+    background: var(--glass);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 35px;
+    text-align: left;
+}
+
+.permission-item {
+    font-size: 14px;
+    margin-bottom: 10px;
+    color: rgba(255,255,255,0.8);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.permission-item span { color: #03dac6; font-weight: bold; }
+
+/* BOTÓN NEÓN PÚRPURA */
+.btn-authorize {
+    width: 100%;
+    padding: 16px;
+    background: var(--purple-neon);
+    color: #000;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.3s;
+    box-shadow: 0 0 20px rgba(187, 134, 252, 0.3);
+}
+
+.btn-authorize:hover {
+    background: #d1b1ff;
+    transform: translateY(-3px);
+    box-shadow: 0 0 30px rgba(187, 134, 252, 0.5);
+}
+
+.link-back {
+    display: block;
+    margin-top: 25px;
+    color: rgba(255,255,255,0.4);
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.link-back:hover { color: white; }
