@@ -1,39 +1,43 @@
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
-let tokenClient;
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.metadata.readonly';
+let tokenClient = null;
 
-// Función para inicializar el cliente de forma segura
-function maybeInitTokenClient() {
-    if (typeof google === 'undefined') {
-        // Si Google no ha cargado, esperamos 100ms y reintentamos
-        setTimeout(maybeInitTokenClient, 100);
-        return;
-    }
-
+function initGoogleAuth() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: '574094373828-h613uosf818tdq6q619bv76ah0upmbb4.apps.googleusercontent.com',
         scope: SCOPES,
-        // En auth.js, modifica el callback:
         callback: (response) => {
-            if (response.error !== undefined) {
+            if (response.error) {
                 console.error("Error en autorización:", response);
                 return;
             }
-            // LIMPIEZA: Borramos el ID anterior para que al entrar busque el archivo correcto
-            localStorage.removeItem('user_spreadsheet_id'); 
-            
+
+            localStorage.removeItem('user_spreadsheet_id');
             localStorage.setItem('gapi_token', response.access_token);
+
             window.location.href = '../index.html';
         },
     });
-    console.log("Cliente de Google Token inicializado");
+
+    console.log("Cliente OAuth inicializado");
 }
 
-window.onload = maybeInitTokenClient;
 
-document.getElementById('authorize-btn').onclick = () => {
-    if (tokenClient) {
-        tokenClient.requestAccessToken({ prompt: 'consent' });
+function waitForGoogle() {
+    if (window.google && google.accounts && google.accounts.oauth2) {
+        initGoogleAuth();
     } else {
-        alert("El servicio de Google aún está cargando. Intenta de nuevo en un segundo.");
+        setTimeout(waitForGoogle, 100);
     }
-};
+}
+
+waitForGoogle();
+
+
+document.getElementById('authorize-btn').addEventListener('click', () => {
+    if (!tokenClient) {
+        alert("Google aún se está cargando, intenta de nuevo.");
+        return;
+    }
+
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+});

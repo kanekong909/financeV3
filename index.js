@@ -48,6 +48,8 @@ async function inicializarApp() {
 // =================================
 async function obtenerIdHojaUsuario() {
     const token = localStorage.getItem('gapi_token');
+
+     console.log("TOKEN USADO PARA DRIVE:", token); // 👈 AQUI
     
     // 1. Intentar leer del caché local (evita duplicados al recargar)
     const idGuardado = localStorage.getItem('user_spreadsheet_id');
@@ -63,6 +65,8 @@ async function obtenerIdHojaUsuario() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
+        console.log("STATUS DRIVE:", res.status); // 👈 AQUI
+        console.log("RESPUESTA DRIVE:", data); // 👈 Y AQUI
 
         // 3. Si existen archivos con ese nombre
         if (data.files && data.files.length > 0) {
@@ -198,7 +202,7 @@ async function loadExpenses() {
             }
 
             return {
-                id: index + 2,
+                rowIndex: index + 2,
                 fechaObjeto: fechaProcesada,
                 fechaTexto: rawDate,
                 monto: parseFloat(row[1]) || 0,
@@ -601,25 +605,6 @@ document.getElementById('close-history').onclick = () => {
     document.getElementById('history-modal').classList.remove('active');
 };
 
-async function loadFullHistoryQuiet() {
-    const token = localStorage.getItem('gapi_token');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
-    try {
-        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await response.json();
-        if (data.values) {
-            fullHistory = data.values.map((row, index) => ({
-                id: index + 2,
-                fechaObjeto: row[0].includes('/') ? 
-                    new Date(row[0].split(' ')[0].split('/').reverse().join('-')) : new Date(row[0]),
-                fechaTexto: row[0],
-                monto: parseFloat(row[1]) || 0,
-                categoria: row[2],
-                descripcion: row[3] || ''
-            }));
-        }
-    } catch (e) { console.log("Error silencioso", e); }
-}
 
 // =================================
 // 8. DESCARGAR PDF
@@ -679,113 +664,150 @@ function updateMonthsDropdown(yearSelected) {
 // --- GENERACIÓN DEL PDF ---
 document.getElementById('download-pdf-btn').onclick = async () => {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
-    const pageHeight = doc.internal.pageSize.height;
-    
-    const year = document.getElementById('export-year-select').value;
-    const monthIndex = document.getElementById('export-month-select').value;
-    const monthName = CONFIG.MESES[monthIndex];
+    const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+    });
 
+    // Colores de tu tema
+    const primary = [187, 134, 252];     // #bb86fc
+    const accent  = [3, 218, 198];       // #03dac6
+    const dark   = [30, 30, 40];
+    const gray   = [140, 140, 160];
+
+    // 1. Obtener periodo seleccionado
+    const year = document.getElementById('export-year-select').value;
+    const monthNum = document.getElementById('export-month-select').value;
+    const monthName = CONFIG.MESES[parseInt(monthNum)]; // Ajusta según tu array
+
+    // 2. Filtrar datos
     const reportData = [...allExpenses, ...fullHistory].filter(exp => {
         const d = new Date(exp.fechaObjeto);
-        return d.getFullYear() == year && d.getMonth() == monthIndex;
+        return d.getFullYear() === parseInt(year) && d.getMonth() === parseInt(monthNum) - 1;
     }).sort((a, b) => a.fechaObjeto - b.fechaObjeto);
 
     if (reportData.length === 0) {
-        showToast("No hay datos para este periodo", true);
+        showToast("No hay gastos para este periodo", true);
         return;
     }
 
-    // --- 1. FONDO CON DEGRADADO ---
-    // Simulamos un degradado dibujando rectángulos finos de oscuro a un poco más claro
-    for (let i = 0; i < pageHeight; i++) {
-        const factor = i / pageHeight;
-        // De un azul/negro profundo (18, 18, 18) a un violeta muy oscuro (30, 20, 50)
-        const r = Math.floor(18 + factor * 12);
-        const g = Math.floor(18 + factor * 2);
-        const b = Math.floor(18 + factor * 32);
-        doc.setDrawColor(r, g, b);
-        doc.line(0, i, pageWidth, i);
-    }
-
-    // --- 2. ENCABEZADO PREMIUM ---
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(28);
-    doc.setTextColor(187, 134, 252); // Tu primary color (Lila)
-    doc.text("Mis Gastos", 14, 25);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(150, 150, 150);
-    doc.setFont("helvetica", "normal");
-    doc.text("REPORTE FINANCIERO MENSUAL", 14, 32);
-
-    // --- 3. TARJETA DE RESUMEN (Glassmorphism effect) ---
     const totalMes = reportData.reduce((sum, exp) => sum + exp.monto, 0);
-    
-    doc.setFillColor(40, 40, 40); // Color de fondo de la tarjeta
-    doc.roundedRect(14, 40, pageWidth - 28, 30, 3, 3, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(12);
-    doc.text(`Periodo: ${monthName} ${year}`, 20, 52);
-    
-    doc.setFontSize(16);
-    doc.setTextColor(187, 134, 252);
-    doc.text(`Total: $${totalMes.toLocaleString('es-CO')}`, 20, 62);
 
-    // --- 4. TABLA ESTILO OSCURO ---
+    // ==========================================
+    // ENCABEZADO ELEGANTE
+    // ==========================================
+    // Fondo degradado superior
+    const gradient = doc.setFillColorGradient({
+        type: 'linear',
+        x1: 0, y1: 0,
+        x2: 210, y2: 0,
+        stops: [
+            { offset: 0, color: [30, 30, 40] },
+            { offset: 0.5, color: [60, 40, 80] },
+            { offset: 1, color: [90, 50, 120] }
+        ]
+    });
+    doc.rect(0, 0, 210, 45, 'F');
+
+    // Título principal
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.setTextColor(...primary);
+    doc.text("REPORTE DE GASTOS", 20, 25);
+
+    // Subtítulo periodo
+    doc.setFontSize(12);
+    doc.setTextColor(220, 220, 255);
+    doc.text(`Periodo: ${monthName} ${year}`, 20, 35);
+
+    // Línea decorativa
+    doc.setDrawColor(...primary);
+    doc.setLineWidth(0.8);
+    doc.line(20, 38, 190, 38);
+
+    // Info de generación (derecha)
+    doc.setFontSize(9);
+    doc.setTextColor(...gray);
+    doc.text(`Generado el ${new Date().toLocaleDateString('es-CO')} a las ${new Date().toLocaleTimeString('es-CO', {hour: '2-digit', minute:'2-digit'})}`, 190, 38, { align: 'right' });
+
+    // ==========================================
+    // RESUMEN VISUAL
+    // ==========================================
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...primary);
+    doc.text("Total Gastado", 20, 55);
+
+    doc.setFontSize(32);
+    doc.setTextColor(255);
+    doc.text(`$${totalMes.toLocaleString('es-CO')}`, 20, 75);
+
+    // Línea divisoria
+    doc.setDrawColor(80, 80, 100);
+    doc.line(20, 80, 190, 80);
+
+    // ==========================================
+    // TABLA DE GASTOS
+    // ==========================================
+    const tableData = reportData.map(exp => [
+        exp.fechaTexto.split(' ')[0],               // Fecha
+        exp.categoria.toUpperCase(),                // Categoría
+        exp.descripcion || 'Sin descripción',       // Descripción
+        `$${exp.monto.toLocaleString('es-CO')}`     // Monto
+    ]);
+
     doc.autoTable({
-        startY: 80,
+        startY: 90,
         head: [['FECHA', 'CATEGORÍA', 'DESCRIPCIÓN', 'MONTO']],
-        body: reportData.map(exp => [
-            exp.fechaTexto.split(' ')[0],
-            exp.categoria.toUpperCase(),
-            exp.descripcion || '-',
-            `$${exp.monto.toLocaleString('es-CO')}`
-        ]),
-        theme: 'plain', // Usamos plain para controlar nosotros los colores
+        body: tableData,
+        theme: 'grid',
         headStyles: {
-            fillColor: [30, 30, 30],
-            textColor: [187, 134, 252],
+            fillColor: primary,
+            textColor: [255, 255, 255],
             fontStyle: 'bold',
-            fontSize: 11,
             halign: 'center',
             lineWidth: 0.1,
-            lineColor: [60, 60, 60]
-        },
-        bodyStyles: {
-            fillColor: [25, 25, 25],
-            textColor: [230, 230, 230],
-            fontSize: 10,
-            lineWidth: 0.1,
-            lineColor: [45, 45, 45]
-        },
-        alternateRowStyles: {
-            fillColor: [32, 32, 32]
+            lineColor: [100, 100, 120]
         },
         columnStyles: {
-            3: { halign: 'right', fontStyle: 'bold', textColor: [255, 255, 255] }
+            0: { cellWidth: 30, halign: 'center' },
+            1: { cellWidth: 40 },
+            2: { cellWidth: 90 },
+            3: { cellWidth: 30, halign: 'right', fontStyle: 'bold' }
         },
-        margin: { left: 14, right: 14 }
+        styles: {
+            font: "helvetica",
+            fontSize: 10,
+            cellPadding: 5,
+            textColor: [220, 220, 230],
+            lineColor: [60, 60, 80],
+            lineWidth: 0.1
+        },
+        alternateRowStyles: {
+            fillColor: [35, 35, 45]  // Rayas muy sutiles
+        },
+        margin: { top: 90, left: 20, right: 20 }
     });
 
-    // --- 5. PIE DE PÁGINA ---
-    const totalPages = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
+    // ==========================================
+    // PIE DE PÁGINA EN TODAS LAS PÁGINAS
+    // ==========================================
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
+        doc.setTextColor(...gray);
         doc.text(
-            `Generado el ${new Date().toLocaleDateString()} • Página ${i} de ${totalPages}`,
-            pageWidth / 2,
-            pageHeight - 10,
+            `Generado con Gastos Diarios - Página ${i} de ${pageCount}`,
+            105, 290,
             { align: 'center' }
         );
     }
 
-    doc.save(`Reporte_Premium_${monthName}.pdf`);
-    showToast("Reporte elegante generado");
+    // Descarga
+    doc.save(`Reporte_Gastos_${monthName}_${year}.pdf`);
+    showToast("Reporte PDF descargado correctamente");
 };
 
 // =================================
@@ -861,6 +883,8 @@ function updateChart(expenses) {
 // 10. EVENTOS DE SALIDA
 // =================================
 document.getElementById('signout-btn')?.addEventListener('click', () => {
-    localStorage.clear();
+    localStorage.removeItem('gapi_token');
+    localStorage.removeItem('user_spreadsheet_id'); // ← Limpieza importante
+    localStorage.removeItem('userToken');
     window.location.href = './login.html';
 });
