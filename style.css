@@ -106,6 +106,20 @@ header h1 {
   transition: var(--transition);
 }
 
+.avatar-fallback {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #3b82f6);
+    color: white;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
 .avatar:hover {
   transform: scale(1.1);
   box-shadow: 0 0 20px rgba(187, 134, 252, 0.6);

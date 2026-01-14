@@ -910,7 +910,7 @@ function mostrarNombreUsuario() {
     const avatar = document.getElementById('user-avatar');
 
     if (userNameEl) {
-        userNameEl.textContent = `Bienvenido, ${payload.name}`;
+       userNameEl.textContent = `Bienvenido/a, ${payload.given_name}`;
     }
 
     if (avatar && payload.picture) {
