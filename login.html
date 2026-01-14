@@ -43,14 +43,18 @@
     </main>
 
     <script>
-        function handleCredentialResponse(response) {
-            console.log("Token de identidad recibido");
-            
-            // 1. Guardamos el ID Token (contiene nombre, foto y email del usuario)
+       function handleCredentialResponse(response) {
             localStorage.setItem('userToken', response.credential);
-            
-            // 2. Redirigimos a la pantalla de permisos de Sheets
-            window.location.href = './templates/auth.html'; 
+
+            const alreadyAuthorized = localStorage.getItem('google_authorized');
+
+            if (alreadyAuthorized) {
+                // Ya dio permisos antes → panel directo
+                window.location.href = './index.html';
+            } else {
+                // Primera vez → pedir permisos
+                window.location.href = './templates/auth.html';
+            }
         }
     </script>
 </body>

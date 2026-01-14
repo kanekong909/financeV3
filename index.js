@@ -15,6 +15,10 @@ let currentDeleteId = null;
 let fullHistory = [];
 let myChart = null;
 
+if (!localStorage.getItem('gapi_token')) {
+    window.location.href = '../login.html';
+}
+
 // =================================
 // 2. CONTROL DE FLUJO (INIT)
 // =================================
@@ -49,8 +53,6 @@ async function inicializarApp() {
 async function obtenerIdHojaUsuario() {
     const token = localStorage.getItem('gapi_token');
 
-     console.log("TOKEN USADO PARA DRIVE:", token); // 👈 AQUI
-    
     // 1. Intentar leer del caché local (evita duplicados al recargar)
     const idGuardado = localStorage.getItem('user_spreadsheet_id');
     if (idGuardado) return idGuardado;
@@ -65,8 +67,6 @@ async function obtenerIdHojaUsuario() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
-        console.log("STATUS DRIVE:", res.status); // 👈 AQUI
-        console.log("RESPUESTA DRIVE:", data); // 👈 Y AQUI
 
         // 3. Si existen archivos con ese nombre
         if (data.files && data.files.length > 0) {
@@ -80,7 +80,7 @@ async function obtenerIdHojaUsuario() {
         }
 
         // 4. Si realmente no existe, lo creamos
-        console.log("No se encontró base de datos. Creando una nueva...");
+        // console.log("No se encontró base de datos. Creando una nueva...");
         const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -330,7 +330,7 @@ function renderExpenses(expenses) {
                     <button class="btn-icon edit" onclick="openEditModal(${expenseData})">
                       <img src="./assets/img/edit.svg" alt="Editar" />
                     </button>
-                    <button class="btn-icon delete" onclick="openDeleteModal(${expense.id})">
+                    <button class="btn-icon delete" onclick="openDeleteModal(${expense.rowIndex})">
                       <img src="./assets/img/delete.svg" alt="Eliminar" />
                     </button>
                 </div>
@@ -408,7 +408,7 @@ document.getElementById('confirm-delete-btn').onclick = async () => {
 
 // --- EDITAR ---
 function openEditModal(expense) {
-    currentEditId = expense.id;
+    currentEditId = expense.rowIndex;;
 
     // --- CONVERSIÓN DE FECHA PARA EL INPUT ---
     let fechaParaInput = "";
@@ -883,8 +883,45 @@ function updateChart(expenses) {
 // 10. EVENTOS DE SALIDA
 // =================================
 document.getElementById('signout-btn')?.addEventListener('click', () => {
-    localStorage.removeItem('gapi_token');
-    localStorage.removeItem('user_spreadsheet_id'); // ← Limpieza importante
-    localStorage.removeItem('userToken');
+    localStorage.removeItem('gapi_token');          // Token OAuth (Sheets / Drive)
+    localStorage.removeItem('user_spreadsheet_id'); // ID de la hoja
+    localStorage.removeItem('google_authorized');   // Marca de permisos
+    localStorage.removeItem('userToken');           // Login con Google Identity
+
     window.location.href = './login.html';
 });
+
+// =================================
+// 11. DATOS DEL USUARIO
+// =================================
+function parseJwt(token) {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+}
+
+function mostrarNombreUsuario() {
+    const token = localStorage.getItem('userToken');
+    if (!token) return;
+
+    const payload = parseJwt(token);
+
+    const userNameEl = document.getElementById('user-name');
+    const avatar = document.getElementById('user-avatar');
+
+    if (userNameEl) {
+        userNameEl.textContent = `Bienvenido, ${payload.name}`;
+    }
+
+    if (avatar && payload.picture) {
+        avatar.src = payload.picture;
+        avatar.alt = payload.name;
+    }
+
+}
+
+mostrarNombreUsuario();
+
+
+
+
