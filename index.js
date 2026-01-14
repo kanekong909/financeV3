@@ -2,22 +2,17 @@
 // 1. CONFIGURACIÓN Y VARIABLES
 // =================================
 const CONFIG = {
-    SPREADSHEET_ID: '1kKvepYlD-5EBQdC3CQ6-42-pen3YW6mGuZ_9PCjmdW0',
+    // Ya no usamos un ID fijo aquí para que cada usuario tenga el suyo
+    NOMBRE_ARCHIVO_DRIVE: 'GastoApp_DB', 
     NOMBRE_HOJA: 'Gastos',
     MESES: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 };
 
+let USER_SPREADSHEET_ID = null; // Se llenará al iniciar sesión
 let allExpenses = [];
-
-// VARIABLES PARA TENER ID DE GASTO ESPECIFICO
 let currentEditId = null;
 let currentDeleteId = null;
-
-// VARIABLE HISTORIAL
-// Variable para el historial completo (sin filtrar por mes)
 let fullHistory = [];
-
-// Graficos
 let myChart = null;
 
 // =================================
@@ -25,25 +20,74 @@ let myChart = null;
 // =================================
 document.addEventListener('DOMContentLoaded', () => {
     const token = localStorage.getItem('gapi_token');
-    
     if (!token) {
         window.location.href = './login.html';
         return;
     }
-    
     inicializarApp();
 });
 
-function inicializarApp() {
-    console.log("App iniciada con éxito");
-    actualizarFechaInput();
-    setupFilters();
-    loadExpenses(); // Carga inicial de datos
-    setupFormListener();
+async function inicializarApp() {
+    console.log("Iniciando conexión con Google Drive...");
+    
+    // PASO CLAVE: Buscar o Crear la hoja del usuario
+    USER_SPREADSHEET_ID = await obtenerIdHojaUsuario();
+
+    if (USER_SPREADSHEET_ID) {
+        actualizarFechaInput();
+        setupFilters();
+        loadExpenses(); 
+        setupFormListener();
+    } else {
+        showToast("Error al preparar la base de datos", true);
+    }
 }
 
 // =================================
-// 3. FUNCIONES DE INTERFAZ (UI)
+// 3. GESTIÓN DE DRIVE
+// =================================
+async function obtenerIdHojaUsuario() {
+    const token = localStorage.getItem('gapi_token');
+    
+    try {
+        // 1. Buscar si ya existe el archivo
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='${CONFIG.NOMBRE_ARCHIVO_DRIVE}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+        const searchRes = await fetch(searchUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+        const searchData = await searchRes.json();
+
+        if (searchData.files && searchData.files.length > 0) {
+            return searchData.files[0].id;
+        }
+
+        // 2. Si no existe, crear uno nuevo
+        console.log("Creando nueva base de datos en tu Drive...");
+        const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                properties: { title: CONFIG.NOMBRE_ARCHIVO_DRIVE },
+                sheets: [{ properties: { title: CONFIG.NOMBRE_HOJA } }]
+            })
+        });
+        const newSheet = await createRes.json();
+        const newId = newSheet.spreadsheetId;
+
+        // 3. Crear cabeceras en la nueva hoja
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${newId}/values/${CONFIG.NOMBRE_HOJA}!A1:D1?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [["Fecha", "Monto", "Categoría", "Descripción"]] })
+        });
+
+        return newId;
+    } catch (error) {
+        console.error("Error en Drive:", error);
+        return null;
+    }
+}
+
+// =================================
+// 4. FUNCIONES DE INTERFAZ (UI)
 // =================================
 function actualizarFechaInput() {
     const now = new Date();
@@ -73,11 +117,19 @@ function showToast(mensaje, esError = false) {
 }
 
 // =================================
-// 4. LÓGICA DE DATOS (GOOGLE SHEETS)
+// 5. LÓGICA DE DATOS (GOOGLE SHEETS)
 // =================================
 async function loadExpenses() {
     const token = localStorage.getItem('gapi_token');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
+    
+    // VALIDACIÓN: Si aún no tenemos el ID de la hoja del usuario, no podemos continuar
+    if (!USER_SPREADSHEET_ID) {
+        console.warn("USER_SPREADSHEET_ID no definido aún.");
+        return;
+    }
+
+    // Cambiamos CONFIG.SPREADSHEET_ID por USER_SPREADSHEET_ID
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
 
     try {
         const response = await fetch(url, {
@@ -88,14 +140,22 @@ async function loadExpenses() {
         
         // Si hay un error de autenticación (Token expirado)
         if (data.error) {
-            localStorage.clear();
-            window.location.href = './login.html';
+            // Si el error es 401 (no autorizado), limpiamos y salimos
+            if (data.error.code === 401) {
+                localStorage.clear();
+                window.location.href = './login.html';
+            } else {
+                console.error("Error de la API:", data.error.message);
+                showToast("Error de permisos o archivo no encontrado", true);
+            }
             return;
         }
 
         if (!data.values) {
             renderExpenses([]);
             updateTotal([]);
+            // Importante: inicializar historial vacío para que el PDF no falle
+            fullHistory = []; 
             return;
         }
 
@@ -103,7 +163,7 @@ async function loadExpenses() {
         const mesActual = ahora.getMonth();
         const anioActual = ahora.getFullYear();
 
-        // 1. Procesar todos los datos primero para tener el historial disponible
+        // 1. Procesar todos los datos
         const todosLosDatosProcesados = data.values.map((row, index) => {
             const rawDate = row[0] || "";
             let fechaProcesada;
@@ -131,7 +191,7 @@ async function loadExpenses() {
         // 2. Guardar en las variables globales
         fullHistory = todosLosDatosProcesados; 
         
-        // 3. Filtrar solo para la vista principal (Mes actual)
+        // 3. Filtrar solo para el mes actual
         allExpenses = todosLosDatosProcesados.filter(expense => {
             return expense.fechaObjeto.getMonth() === mesActual && 
                    expense.fechaObjeto.getFullYear() === anioActual;
@@ -141,25 +201,34 @@ async function loadExpenses() {
         renderExpenses(allExpenses);
         updateTotal(allExpenses);
 
-        // 5. Actualizar selectores de PDF (Sin bloquear la carga)
+        // 5. Actualizar selectores de PDF
         updateExportSelector();
 
     } catch (error) {
         console.error("Error crítico en loadExpenses:", error);
-        showToast("Error al conectar con Google Sheets", true);
+        showToast("Error al conectar con tu base de datos", true);
     }
 }
 
+// Formulario guardar gasto
 function setupFormListener() {
     const expenseForm = document.getElementById('expense-form');
     if (!expenseForm) return;
 
     expenseForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        // 1. Validar si ya tenemos el ID de la hoja del usuario
+        if (!USER_SPREADSHEET_ID) {
+            showToast('Error: Base de datos no vinculada aún', true);
+            return;
+        }
+
         const token = localStorage.getItem('gapi_token');
-        
         const btn = expenseForm.querySelector('button');
         const originalText = btn.innerText;
+        
+        // UI Feedback
         btn.innerText = 'Enviando...';
         btn.disabled = true;
 
@@ -171,7 +240,8 @@ function setupFormListener() {
         ]];
 
         try {
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A1:append?valueInputOption=USER_ENTERED`;
+            // CAMBIO: Usamos USER_SPREADSHEET_ID en lugar de CONFIG.SPREADSHEET_ID
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A1:append?valueInputOption=USER_ENTERED`;
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -182,14 +252,20 @@ function setupFormListener() {
                 body: JSON.stringify({ values })
             });
 
-            if (!response.ok) throw new Error("Error en la API");
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error.message || "Error en la API");
+            }
 
             showToast('¡Gasto guardado con éxito!');
             expenseForm.reset();
             actualizarFechaInput();
-            loadExpenses(); // Recargar lista automáticamente tras agregar
+            
+            // Recargar la lista para mostrar el nuevo gasto y actualizar el gráfico
+            loadExpenses(); 
             
         } catch (err) {
+            console.error("Error al guardar:", err);
             showToast('Error: ' + err.message, true);
         } finally {
             btn.innerText = originalText;
@@ -288,7 +364,8 @@ function openDeleteModal(id) {
 
 document.getElementById('confirm-delete-btn').onclick = async () => {
     const token = localStorage.getItem('gapi_token');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/Gastos!A${currentDeleteId}:D${currentDeleteId}:clear`;
+    // CAMBIO: Usar USER_SPREADSHEET_ID
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A${currentDeleteId}:D${currentDeleteId}:clear`;
 
     try {
         const response = await fetch(url, {
@@ -353,7 +430,8 @@ document.getElementById('edit-form').onsubmit = async (e) => {
         document.getElementById('edit-descripcion').value
     ]];
 
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/Gastos!A${currentEditId}:D${currentEditId}?valueInputOption=USER_ENTERED`;
+    // CAMBIO: Usar USER_SPREADSHEET_ID
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A${currentEditId}:D${currentEditId}?valueInputOption=USER_ENTERED`;
 
     try {
         const response = await fetch(url, {
@@ -396,7 +474,7 @@ document.getElementById('view-history-btn').onclick = async () => {
 // 2. Cargar todos los datos de Sheets
 async function loadFullHistory() {
     const token = localStorage.getItem('gapi_token');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
 
     try {
         const response = await fetch(url, {
@@ -525,7 +603,7 @@ async function loadFullHistoryQuiet() {
 }
 
 // =================================
-// DESCARGAR PDF
+// 8. DESCARGAR PDF
 // =================================
 // --- CONFIGURACIÓN DE SELECTORES DE EXPORTACIÓN ---
 function updateExportSelector() {
@@ -692,7 +770,7 @@ document.getElementById('download-pdf-btn').onclick = async () => {
 };
 
 // =================================
-// GRAFICOS
+// 9. GRAFICOS
 // =================================
 function updateChart(expenses) {
     const ctx = document.getElementById('expensesChart');
@@ -761,7 +839,7 @@ function updateChart(expenses) {
 }
 
 // =================================
-// 6. EVENTOS DE SALIDA
+// 10. EVENTOS DE SALIDA
 // =================================
 document.getElementById('signout-btn')?.addEventListener('click', () => {
     localStorage.clear();
