@@ -2,10 +2,7 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googlea
 let tokenClient = null;
 
 // 🔹 Si ya tiene token y autorización → saltar auth.html
-if (
-    localStorage.getItem('gapi_token') &&
-    localStorage.getItem('google_authorized')
-) {
+if (localStorage.getItem('google_authorized') === 'true') {
     window.location.href = '../index.html';
 }
 

@@ -43,10 +43,10 @@
     </main>
 
     <script>
-       function handleCredentialResponse(response) {
+        function handleCredentialResponse(response) {
             localStorage.setItem('userToken', response.credential);
 
-            const alreadyAuthorized = localStorage.getItem('google_authorized');
+            const alreadyAuthorized = localStorage.getItem('google_authorized') === 'true';
 
             if (alreadyAuthorized) {
                 // Ya dio permisos antes → panel directo

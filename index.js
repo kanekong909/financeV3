@@ -917,10 +917,11 @@ function mostrarNombreUsuario() {
         avatar.src = payload.picture;
         avatar.alt = payload.name;
     }
-
 }
 
 mostrarNombreUsuario();
+
+
 
 
 
