@@ -14,6 +14,8 @@ let currentEditId = null;
 let currentDeleteId = null;
 let fullHistory = [];
 let myChart = null;
+let deleteFromHistory = false;
+
 
 if (!localStorage.getItem('gapi_token')) {
     window.location.href = '../login.html';
@@ -303,20 +305,33 @@ function setupFormListener() {
 function renderExpenses(expenses) {
     const listElement = document.getElementById('expenses-list');
     if (!listElement) return;
-    
-    // 1. Limpiar la lista actual
+
+    // 1. Limpiar la lista
     listElement.innerHTML = '';
 
-    // 2. ACTUALIZAR EL GRÁFICO 
-    // Usamos los mismos datos que recibe la lista para que el gráfico sea coherente
-    updateChart(expenses); 
+    // 2. Ordenar DESCENDENTE por fecha (más reciente ARRIBA)
+    const sortedExpenses = [...expenses].sort((a, b) => {
+        // Convertimos a Date para comparar correctamente
+        const fechaA = new Date(a.fechaObjeto);
+        const fechaB = new Date(b.fechaObjeto);
+        return fechaB - fechaA; // b (más nuevo) antes que a
+    });
 
-    // 3. Renderizar cada item en el HTML
-    expenses.forEach(expense => {
+    // 3. Actualizar gráfico con los datos ya ordenados
+    updateChart(sortedExpenses);
+
+    // 4. Si no hay gastos
+    if (sortedExpenses.length === 0) {
+        listElement.innerHTML = '<p style="text-align:center; color:#888; padding:20px;">Sin gastos aún</p>';
+        return;
+    }
+
+    // 5. Renderizar cada gasto (ahora en orden descendente)
+    sortedExpenses.forEach(expense => {
         const item = document.createElement('div');
         item.className = 'expense-item';
         
-        // Escapamos el objeto expense para que el onclick no de errores con comillas
+        // Escapamos para evitar problemas con JSON en onclick
         const expenseData = JSON.stringify(expense).replace(/"/g, '&quot;');
 
         item.innerHTML = `
@@ -325,7 +340,7 @@ function renderExpenses(expenses) {
                 <small>${expense.fechaTexto} • ${expense.categoria}</small>
             </div>
             <div class="expense-actions">
-                <span class="expense-amount">$${expense.monto.toLocaleString()}</span>
+                <span class="expense-amount">$${expense.monto.toLocaleString('es-CO')}</span>
                 <div class="action-buttons">
                     <button class="btn-icon edit" onclick="openEditModal(${expenseData})">
                       <img src="./assets/img/edit.svg" alt="Editar" />
@@ -359,14 +374,18 @@ function setupFilters() {
     const categorySelect = document.getElementById('filter-category');
 
     const filterData = () => {
-        const searchTerm = searchInput.value.toLowerCase();
-        const categoryTerm = categorySelect.value;
+        const searchTerm = searchInput?.value?.toLowerCase() || '';
+        const categoryTerm = categorySelect?.value || 'All';
 
-        const filtered = allExpenses.filter(exp => {
+        // Filtrar
+        let filtered = allExpenses.filter(exp => {
             const matchesSearch = exp.descripcion.toLowerCase().includes(searchTerm);
             const matchesCategory = categoryTerm === 'All' || exp.categoria === categoryTerm;
             return matchesSearch && matchesCategory;
         });
+
+        // Orden descendente (más reciente arriba)
+        filtered.sort((a, b) => new Date(b.fechaObjeto) - new Date(a.fechaObjeto));
 
         renderExpenses(filtered);
         updateTotal(filtered);
@@ -374,20 +393,23 @@ function setupFilters() {
 
     if (searchInput) searchInput.addEventListener('input', filterData);
     if (categorySelect) categorySelect.addEventListener('change', filterData);
+
+    // Aplicar filtro y orden inicial al cargar
+    filterData();
 }
 
 // =================================
 // 6. ELIMINAR Y EDITAR GASTOS
 // =================================
 // --- ELIMINAR ---
-function openDeleteModal(id) {
+function openDeleteModal(id, fromHistory = true) {
+    deleteFromHistory = fromHistory;
     currentDeleteId = id;
     document.getElementById('delete-modal').classList.add('active');
 }
 
 document.getElementById('confirm-delete-btn').onclick = async () => {
     const token = localStorage.getItem('gapi_token');
-    // CAMBIO: Usar USER_SPREADSHEET_ID
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A${currentDeleteId}:D${currentDeleteId}:clear`;
 
     try {
@@ -398,6 +420,17 @@ document.getElementById('confirm-delete-btn').onclick = async () => {
 
         if (response.ok) {
             showToast("Gasto eliminado");
+
+            // ✅ cerrar SOLO el modal de eliminar
+            document.getElementById('delete-modal').classList.remove('active');
+
+            if (deleteFromHistory) {
+                await loadFullHistory(); // refresca historial
+                deleteFromHistory = false;
+                return;
+            }
+
+            // flujo normal fuera del historial
             closeModals();
             loadExpenses();
         }
@@ -405,6 +438,7 @@ document.getElementById('confirm-delete-btn').onclick = async () => {
         showToast("Error al eliminar", true);
     }
 };
+
 
 // --- EDITAR ---
 function openEditModal(expense) {
@@ -468,9 +502,11 @@ document.getElementById('edit-form').onsubmit = async (e) => {
 
         if (response.ok) {
             showToast("Gasto actualizado");
-            closeModals();
-            loadExpenses();
+            closeEditModal();     // SOLO cerrar edición
+            await loadFullHistory(); // refresca historial
+            loadExpenses();       // refresca mes actual
         }
+
     } catch (error) {
         showToast("Error al actualizar", true);
     }
@@ -481,9 +517,20 @@ function closeModals() {
     document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
 }
 
-document.querySelectorAll('.modal-close, .modal-cancel, #cancel-delete-btn, #close-delete-x').forEach(btn => {
-    btn.onclick = closeModals;
+function closeEditModal() {
+    document.getElementById('edit-modal')?.classList.remove('active');
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal')?.classList.remove('active');
+}
+
+
+document.querySelectorAll('#edit-modal .modal-close, #edit-modal .modal-cancel')
+    .forEach(btn => {
+        btn.onclick = closeEditModal;
 });
+
 
 // =================================
 // 7. VER HISTORIAL COMPLETO
@@ -494,7 +541,7 @@ document.getElementById('view-history-btn').onclick = async () => {
     await loadFullHistory();
 };
 
-// 2. Cargar todos los datos de Sheets
+// 2. Cargar todos los datos de Sheets y agrupar por mes
 async function loadFullHistory() {
     const token = localStorage.getItem('gapi_token');
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${USER_SPREADSHEET_ID}/values/${CONFIG.NOMBRE_HOJA}!A2:D?majorDimension=ROWS`;
@@ -505,98 +552,170 @@ async function loadFullHistory() {
         });
         const data = await response.json();
 
-        if (data.values) {
-            const ahora = new Date();
-            const mesActual = ahora.getMonth();
-            const anioActual = ahora.getFullYear();
-
-            // Mapeamos y luego FILTRAMOS para que NO sea el mes actual
-            fullHistory = data.values.map((row, index) => {
-                const rawDate = row[0] || "";
-                let fechaProcesada;
-
-                // Lógica de limpieza de fecha (igual que en loadExpenses)
-                if (rawDate.includes('/')) {
-                    const partes = rawDate.split(' ')[0].split('/'); 
-                    const dia = parseInt(partes[0]);
-                    const mes = parseInt(partes[1]) - 1; 
-                    const anio = parseInt(partes[2]);
-                    fechaProcesada = new Date(anio, mes, dia);
-                } else {
-                    fechaProcesada = new Date(rawDate);
-                }
-
-                return {
-                    id: index + 2,
-                    fechaObjeto: fechaProcesada,
-                    fechaTexto: rawDate,
-                    monto: parseFloat(row[1]) || 0,
-                    categoria: row[2],
-                    descripcion: row[3] || ''
-                };
-            })
-            .filter(expense => {
-                // EXCLUIR MES ACTUAL: 
-                // Solo pasa si el mes es diferente O el año es diferente al actual
-                const esMesActual = expense.fechaObjeto.getMonth() === mesActual && 
-                                   expense.fechaObjeto.getFullYear() === anioActual;
-                
-                return !esMesActual; // Solo devolvemos los que NO son del mes actual
-            })
-            .reverse();
-            
-            renderHistory(fullHistory);
+        if (!data.values) {
+            renderHistory([]);
+            return;
         }
+
+        const ahora = new Date();
+        const mesActual = ahora.getMonth();
+        const anioActual = ahora.getFullYear();
+
+        // Procesar todos los gastos (excluyendo el mes actual)
+        const processed = data.values.map((row, index) => {
+            const rawDate = row[0] || "";
+            let fechaProcesada;
+
+            if (rawDate.includes('/')) {
+                const partes = rawDate.split(' ')[0].split('/');
+                const dia = parseInt(partes[0]);
+                const mes = parseInt(partes[1]) - 1;
+                const anio = parseInt(partes[2]);
+                fechaProcesada = new Date(anio, mes, dia);
+            } else {
+                fechaProcesada = new Date(rawDate);
+            }
+
+            return {
+                rowIndex: index + 2,
+                fechaObjeto: fechaProcesada,
+                fechaTexto: rawDate,
+                monto: parseFloat(row[1]) || 0,
+                categoria: row[2] || 'Otros',
+                descripcion: row[3] || ''
+            };
+        }).filter(expense => {
+            // Excluir mes actual
+            return !(expense.fechaObjeto.getMonth() === mesActual && 
+                     expense.fechaObjeto.getFullYear() === anioActual);
+        });
+
+        // Agrupar por mes/año (clave: "MM/YYYY")
+        const grouped = {};
+        processed.forEach(exp => {
+            const mes = exp.fechaObjeto.getMonth() + 1; // 1-12
+            const anio = exp.fechaObjeto.getFullYear();
+            const key = `${mes.toString().padStart(2, '0')}/${anio}`;
+
+            if (!grouped[key]) {
+                grouped[key] = {
+                    mes: mes,
+                    anio: anio,
+                    gastos: [],
+                    total: 0
+                };
+            }
+
+            grouped[key].gastos.push(exp);
+            grouped[key].total += exp.monto;
+        });
+
+        // Convertir a array y ordenar por fecha descendente (mes más reciente primero)
+        fullHistory = Object.values(grouped).sort((a, b) => {
+            const dateA = new Date(a.anio, a.mes - 1);
+            const dateB = new Date(b.anio, b.mes - 1);
+            return dateB - dateA;
+        });
+
+        // Renderizar el historial agrupado
+        renderHistory(fullHistory);
+
     } catch (error) {
         console.error("Error cargando historial:", error);
         showToast("Error al cargar el historial", true);
     }
 }
 
-// 3. Renderizar el historial en el modal
-function renderHistory(data) {
+// 3. Renderizar historial agrupado por mes con totales
+function renderHistory(groupedData) {
     const container = document.getElementById('history-list-container');
+    if (!container) return;
+
     container.innerHTML = '';
 
-    data.forEach(expense => {
-        const item = document.createElement('div');
-        item.className = 'expense-item'; 
-        // Reutilizamos la clase expense-item para mantener el estilo
-        item.innerHTML = `
-            <div class="expense-info">
-                <strong>${expense.descripcion}</strong>
-                <small>${expense.fechaTexto} • ${expense.categoria}</small>
+    if (groupedData.length === 0) {
+        container.innerHTML = '<p style="text-align:center; color:#888; padding:30px;">No hay gastos en meses anteriores.</p>';
+        return;
+    }
+
+    groupedData.forEach(group => {
+        // Separador de mes con total
+        const monthHeader = document.createElement('div');
+        monthHeader.className = 'history-month-header';
+        monthHeader.innerHTML = `
+            <div class="month-title">
+                ${CONFIG.MESES[group.mes - 1]} ${group.anio}
             </div>
-            <div class="expense-actions">
-                <span class="expense-amount">$${expense.monto.toLocaleString()}</span>
-                <div class="action-buttons" style="opacity: 1;"> 
-                    <button class="btn-icon edit" onclick="openEditFromHistory(${JSON.stringify(expense).replace(/"/g, '&quot;')})">
-                      <img src="./assets/img/edit.svg" alt="Editar" />
-                    </button>
-                    <button class="btn-icon delete" onclick="openDeleteModal(${expense.id})">
-                      <img src="./assets/img/delete.svg" alt="Eliminar" />
-                    </button>
-                </div>
+            <div class="month-total">
+                Total: $${group.total.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
             </div>
         `;
-        container.appendChild(item);
+        container.appendChild(monthHeader);
+
+        // Lista de gastos de este mes (orden descendente)
+        group.gastos.sort((a, b) => new Date(b.fechaObjeto) - new Date(a.fechaObjeto));
+
+        group.gastos.forEach(expense => {
+            const item = document.createElement('div');
+            item.className = 'expense-item';
+            
+            const expenseData = JSON.stringify(expense).replace(/"/g, '&quot;');
+
+            item.innerHTML = `
+                <div class="expense-info">
+                    <strong>${expense.descripcion || 'Sin descripción'}</strong>
+                    <small>${expense.fechaTexto} • ${expense.categoria}</small>
+                </div>
+                <div class="expense-actions">
+                    <span class="expense-amount">
+                        $${expense.monto.toLocaleString('es-CO')}
+                    </span>
+                    <div class="action-buttons">
+                        <button class="btn-icon edit" onclick="openEditFromHistory(${expenseData})">
+                          <img src="./assets/img/edit.svg" alt="Editar" />
+                        </button>
+                        <button class="btn-icon delete" onclick="openDeleteModal(${expense.rowIndex})">
+                          <img src="./assets/img/delete.svg" alt="Eliminar" />
+                        </button>
+                    </div>
+                </div>
+            `;
+            container.appendChild(item);
+        });
     });
 }
 
 // 4. Puente para editar desde el historial
 function openEditFromHistory(expense) {
-    // Cerramos el modal de historial para que no estorbe al de edición
-    document.getElementById('history-modal').classList.remove('active');
-    openEditModal(expense);
+    openEditModal(expense, { fromHistory: true });
 }
 
 // 5. Buscador interno del historial
 document.getElementById('history-search').oninput = (e) => {
-    const term = e.target.value.toLowerCase();
-    const filtered = fullHistory.filter(exp => 
-        exp.descripcion.toLowerCase().includes(term) || 
-        exp.categoria.toLowerCase().includes(term)
-    );
+    const term = e.target.value.toLowerCase().trim();
+
+    if (!term) {
+        renderHistory(fullHistory);
+        return;
+    }
+
+    const filtered = fullHistory
+        .map(group => {
+            const gastosFiltrados = group.gastos.filter(expense =>
+                (expense.descripcion || '').toLowerCase().includes(term) ||
+                (expense.categoria || '').toLowerCase().includes(term)
+            );
+
+            if (gastosFiltrados.length === 0) return null;
+
+            return {
+                ...group,
+                gastos: gastosFiltrados,
+                total: gastosFiltrados.reduce((sum, g) => sum + g.monto, 0)
+            };
+        })
+        .filter(Boolean);
+
     renderHistory(filtered);
 };
 
@@ -604,7 +723,6 @@ document.getElementById('history-search').oninput = (e) => {
 document.getElementById('close-history').onclick = () => {
     document.getElementById('history-modal').classList.remove('active');
 };
-
 
 // =================================
 // 8. DESCARGAR PDF
@@ -684,7 +802,7 @@ document.getElementById('download-pdf-btn').onclick = async () => {
     // 2. Filtrar datos
     const reportData = [...allExpenses, ...fullHistory].filter(exp => {
         const d = new Date(exp.fechaObjeto);
-        return d.getFullYear() === parseInt(year) && d.getMonth() === parseInt(monthNum) - 1;
+        return d.getFullYear() === parseInt(year) && d.getMonth() === parseInt(monthNum);
     }).sort((a, b) => a.fechaObjeto - b.fechaObjeto);
 
     if (reportData.length === 0) {
@@ -698,16 +816,18 @@ document.getElementById('download-pdf-btn').onclick = async () => {
     // ENCABEZADO ELEGANTE
     // ==========================================
     // Fondo degradado superior
-    const gradient = doc.setFillColorGradient({
-        type: 'linear',
-        x1: 0, y1: 0,
-        x2: 210, y2: 0,
-        stops: [
-            { offset: 0, color: [30, 30, 40] },
-            { offset: 0.5, color: [60, 40, 80] },
-            { offset: 1, color: [90, 50, 120] }
-        ]
-    });
+    // Simulación de degradado con franjas
+    const gradientSteps = 20;
+    for (let i = 0; i < gradientSteps; i++) {
+        const ratio = i / gradientSteps;
+        const r = Math.round(30 + ratio * (90 - 30));
+        const g = Math.round(30 + ratio * (50 - 30));
+        const b = Math.round(40 + ratio * (120 - 40));
+
+        doc.setFillColor(r, g, b);
+        doc.rect(0, i * (45 / gradientSteps), 210, 45 / gradientSteps, 'F');
+    }
+
     doc.rect(0, 0, 210, 45, 'F');
 
     // Título principal
@@ -720,11 +840,6 @@ document.getElementById('download-pdf-btn').onclick = async () => {
     doc.setFontSize(12);
     doc.setTextColor(220, 220, 255);
     doc.text(`Periodo: ${monthName} ${year}`, 20, 35);
-
-    // Línea decorativa
-    doc.setDrawColor(...primary);
-    doc.setLineWidth(0.8);
-    doc.line(20, 38, 190, 38);
 
     // Info de generación (derecha)
     doc.setFontSize(9);
@@ -740,7 +855,7 @@ document.getElementById('download-pdf-btn').onclick = async () => {
     doc.text("Total Gastado", 20, 55);
 
     doc.setFontSize(32);
-    doc.setTextColor(255);
+    doc.setTextColor(...primary);
     doc.text(`$${totalMes.toLocaleString('es-CO')}`, 20, 75);
 
     // Línea divisoria
@@ -750,44 +865,57 @@ document.getElementById('download-pdf-btn').onclick = async () => {
     // ==========================================
     // TABLA DE GASTOS
     // ==========================================
-    const tableData = reportData.map(exp => [
-        exp.fechaTexto.split(' ')[0],               // Fecha
-        exp.categoria.toUpperCase(),                // Categoría
-        exp.descripcion || 'Sin descripción',       // Descripción
-        `$${exp.monto.toLocaleString('es-CO')}`     // Monto
-    ]);
+    const tableData = reportData.map(exp => {
+     const fecha = new Date(exp.fechaObjeto);
+
+        return [
+            fecha.toLocaleDateString('es-CO') + ' ' +
+            fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+
+            `$${exp.monto.toLocaleString('es-CO')}`, // 👈 MONTO AQUÍ
+
+            exp.categoria.toUpperCase(),
+
+            exp.descripcion || '—'
+        ];
+    });
 
     doc.autoTable({
         startY: 90,
-        head: [['FECHA', 'CATEGORÍA', 'DESCRIPCIÓN', 'MONTO']],
+        head: [['FECHA', 'MONTO', 'CATEGORÍA', 'DESCRIPCIÓN']],
         body: tableData,
         theme: 'grid',
-        headStyles: {
-            fillColor: primary,
-            textColor: [255, 255, 255],
-            fontStyle: 'bold',
-            halign: 'center',
-            lineWidth: 0.1,
-            lineColor: [100, 100, 120]
-        },
-        columnStyles: {
-            0: { cellWidth: 30, halign: 'center' },
-            1: { cellWidth: 40 },
-            2: { cellWidth: 90 },
-            3: { cellWidth: 30, halign: 'right', fontStyle: 'bold' }
-        },
+
         styles: {
-            font: "helvetica",
-            fontSize: 10,
-            cellPadding: 5,
+            font: 'helvetica',
+            fontSize: 9,
+            cellPadding: 4,
+            overflow: 'linebreak',
             textColor: [220, 220, 230],
+            fillColor: [25, 25, 35],   // 👈 fondo base oscuro
             lineColor: [60, 60, 80],
             lineWidth: 0.1
         },
-        alternateRowStyles: {
-            fillColor: [35, 35, 45]  // Rayas muy sutiles
+
+        headStyles: {
+            fillColor: [187, 134, 252],
+            textColor: 255,
+            fontStyle: 'bold',
+            halign: 'center'
         },
-        margin: { top: 90, left: 20, right: 20 }
+
+        columnStyles: {
+            0: { cellWidth: 40 }, // Fecha + hora
+            1: { cellWidth: 30, halign: 'right', fontStyle: 'bold' }, // Monto
+            2: { cellWidth: 35 }, // Categoría
+            3: { cellWidth: 65 }  // Descripción
+        },
+
+        alternateRowStyles: {
+            fillColor: [35, 35, 45]
+        },
+
+        margin: { left: 20, right: 20 }
     });
 
     // ==========================================
@@ -920,9 +1048,3 @@ function mostrarNombreUsuario() {
 }
 
 mostrarNombreUsuario();
-
-
-
-
-
-

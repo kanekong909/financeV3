@@ -473,6 +473,25 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 .modal.active { display: flex; }
 
+/* ================================
+   JERARQUÍA DE MODALES
+   ================================ */
+
+/* Historial */
+#history-modal {
+    z-index: 1000;
+}
+
+/* Editar (SIEMPRE por encima del historial) */
+#edit-modal {
+    z-index: 1100;
+}
+
+/* Eliminar (más arriba aún) */
+#delete-modal {
+    z-index: 1200;
+}
+
 .modal-content {
   background: #181818;
   border: 1px solid var(--border-color);
@@ -590,6 +609,10 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     flex-grow: 1; /* Ocupa el espacio restante */
 }
 
+#history-list-container .expense-item {
+  padding: 0 10px;
+}
+
 /* Estilo de los items dentro del historial */
 #history-list-container .expense-item {
     padding: 16px 0;
@@ -617,6 +640,48 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 #history-list-container::-webkit-scrollbar-thumb:hover {
     background: var(--primary-color);
+}
+
+/* Separadores de mes en historial */
+.history-month-header {
+    background: rgba(30, 30, 50, 0.8);
+    padding: 16px 20px;
+    margin: 20px 0 12px;
+    border-radius: 12px;
+    border-left: 4px solid var(--primary-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.month-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.month-total {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #e1e1e1; /* o tu color de acento */
+}
+
+/* Items dentro del mes */
+#history-list-container .expense-item {
+    padding: 14px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    transition: background 0.2s;
+}
+
+#history-list-container .expense-item:last-child {
+    border-bottom: none;
+}
+
+#history-list-container .expense-item:hover {
+    background: rgba(187, 134, 252, 0.05);
 }
 
 /* Responsivo para celulares */
